@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<!-- Otwórz ten plik w przeglądarce RAZ, aby wygenerować ikony aplikacji -->
+<html>
+<head><meta charset="UTF-8"><title>Generator ikon</title></head>
+<body>
+<h2>Generator ikon – kliknij przycisk, aby pobrać ikony</h2>
+<button onclick="generate(192)">Pobierz icon-192.png</button>
+<button onclick="generate(512)">Pobierz icon-512.png</button>
+<canvas id="c" style="display:none"></canvas>
+<script>
+function generate(size) {
+  const canvas = document.getElementById('c');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  
+  // Background
+  ctx.fillStyle = '#2563eb';
+  ctx.roundRect(0, 0, size, size, size * 0.2);
+  ctx.fill();
+  
+  // Icon emoji
+  ctx.font = `bold ${size * 0.55}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('📇', size / 2, size / 2);
+  
+  const a = document.createElement('a');
+  a.download = `icon-${size}.png`;
+  a.href = canvas.toDataURL('image/png');
+  a.click();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="theme-color" content="#2563eb" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Skaner Wizytówek" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+  <title>Skaner Wizytówek</title>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="app-header">
+    <div class="header-content">
+      <span class="header-icon">📇</span>
+      <h1>Skaner Wizytówek</h1>
+    </div>
+    <button id="btn-settings" class="icon-btn" title="Ustawienia">⚙️</button>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <main>
+
+    <!-- SETTINGS PANEL -->
+    <section id="settings-panel" class="card hidden">
+      <h2>⚙️ Ustawienia</h2>
+      <p class="hint">Wklej adres URL swojego Google Apps Script, aby dane były automatycznie zapisywane w Google Sheets.</p>
+      <label for="sheets-url">URL Google Apps Script</label>
+      <input type="url" id="sheets-url" placeholder="https://script.google.com/macros/s/..." />
+      <div class="btn-row">
+        <button id="btn-save-settings" class="btn btn-primary">💾 Zapisz</button>
+        <button id="btn-test-connection" class="btn btn-secondary">🔗 Testuj połączenie</button>
+      </div>
+      <div id="connection-status"></div>
+    </section>
+
+    <!-- SCAN CARD -->
+    <section id="scan-card" class="card">
+      <h2>📷 Skanuj wizytówkę</h2>
+      <p class="hint">Zrób zdjęcie wizytówki lub wybierz ją z galerii. OCR automatycznie wyciągnie dane.</p>
+
+      <div id="drop-zone">
+        <input type="file" id="file-input" accept="image/*" capture="environment" />
+        <label for="file-input" class="upload-label">
+          <span class="upload-icon">📸</span>
+          <span class="upload-text">Dotknij, aby zrobić zdjęcie</span>
+          <span class="upload-sub">lub wybierz z galerii</span>
+        </label>
+      </div>
+
+      <div id="preview-container" class="hidden">
+        <img id="preview-img" src="" alt="Podgląd wizytówki" />
+        <button id="btn-clear-img" class="btn btn-ghost">✕ Zmień zdjęcie</button>
+      </div>
+
+      <div id="ocr-status" class="hidden">
+        <div class="progress-bar">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+        <p id="ocr-status-text">Przygotowywanie OCR...</p>
+      </div>
+
+      <button id="btn-scan" class="btn btn-primary btn-large hidden">
+        🔍 Skanuj i wyciągnij dane
+      </button>
+    </section>
+
+    <!-- EXTRACTED DATA FORM -->
+    <section id="data-form" class="card hidden">
+      <h2>✏️ Wyciągnięte dane</h2>
+      <p class="hint">Sprawdź i popraw dane przed zapisaniem.</p>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="f-name">👤 Imię i Nazwisko</label>
+          <input type="text" id="f-name" placeholder="Jan Kowalski" />
+        </div>
+        <div class="form-group">
+          <label for="f-company">🏢 Firma</label>
+          <input type="text" id="f-company" placeholder="ABC Sp. z o.o." />
+        </div>
+        <div class="form-group">
+          <label for="f-title">💼 Stanowisko</label>
+          <input type="text" id="f-title" placeholder="Dyrektor sprzedaży" />
+        </div>
+        <div class="form-group">
+          <label for="f-phone">📞 Telefon</label>
+          <input type="tel" id="f-phone" placeholder="+48 123 456 789" />
+        </div>
+        <div class="form-group">
+          <label for="f-email">✉️ E-mail</label>
+          <input type="email" id="f-email" placeholder="jan@firma.pl" />
+        </div>
+        <div class="form-group">
+          <label for="f-website">🌐 Strona WWW</label>
+          <input type="text" id="f-website" placeholder="www.firma.pl" />
+        </div>
+        <div class="form-group full-width">
+          <label for="f-address">📍 Adres</label>
+          <input type="text" id="f-address" placeholder="ul. Przykładowa 1, 00-001 Warszawa" />
+        </div>
+        <div class="form-group full-width">
+          <label for="f-notes">📝 Notatki</label>
+          <textarea id="f-notes" placeholder="Dodatkowe informacje..."></textarea>
+        </div>
+      </div>
+
+      <div id="raw-ocr-toggle">
+        <button id="btn-show-raw" class="btn btn-ghost btn-sm">👁 Pokaż surowy tekst OCR</button>
+        <pre id="raw-ocr-text" class="hidden"></pre>
+      </div>
+
+      <div class="btn-row">
+        <button id="btn-save-contact" class="btn btn-primary btn-large">
+          💾 Zapisz kontakt
+        </button>
+        <button id="btn-cancel-form" class="btn btn-ghost">✕ Anuluj</button>
+      </div>
+      <div id="save-status"></div>
+    </section>
+
+    <!-- CONTACTS TABLE -->
+    <section id="contacts-section" class="card">
+      <div class="section-header">
+        <h2>📋 Zapisane kontakty</h2>
+        <div class="table-actions">
+          <input type="text" id="search-input" placeholder="🔍 Szukaj..." class="search-input" />
+          <button id="btn-export-csv" class="btn btn-secondary btn-sm">⬇️ Eksport CSV</button>
+          <button id="btn-clear-all" class="btn btn-danger btn-sm">🗑 Wyczyść wszystko</button>
+        </div>
+      </div>
+
+      <div id="contacts-empty" class="empty-state">
+        <span>📭</span>
+        <p>Brak zapisanych kontaktów.<br>Zeskanuj pierwszą wizytówkę!</p>
+      </div>
+
+      <div id="table-wrapper" class="hidden">
+        <table id="contacts-table">
+          <thead>
+            <tr>
+              <th>Imię i Nazwisko</th>
+              <th>Firma</th>
+              <th>Stanowisko</th>
+              <th>Telefon</th>
+              <th>E-mail</th>
+              <th>WWW</th>
+              <th>Adres</th>
+              <th>Data dodania</th>
+              <th>Akcje</th>
+            </tr>
+          </thead>
+          <tbody id="contacts-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- DELETE CONFIRM MODAL -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Usuń kontakt?</h3>
+      <p id="modal-message">Czy na pewno chcesz usunąć ten kontakt?</p>
+      <div class="btn-row">
+        <button id="modal-confirm" class="btn btn-danger">Usuń</button>
+        <button id="modal-cancel" class="btn btn-ghost">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tesseract.js OCR library (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>
