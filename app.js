@@ -152,29 +152,122 @@ function clearImage() {
   fileInput.value = '';
 }
 
-// ---- IMAGE PRE-PROCESSING (poprawia jakość OCR) ----
+// ---- SMART CARD DETECTION + CROP + PRE-PROCESS ----
 function preprocessImage(file) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
+      // --- Step 1: sample-based card detection on small thumbnail ---
+      const THUMB = 300; // work on 300px wide thumbnail for speed
+      const thumbScale = THUMB / img.width;
+      const thumbW = THUMB;
+      const thumbH = Math.round(img.height * thumbScale);
+
+      const thumbCanvas = document.createElement('canvas');
+      thumbCanvas.width  = thumbW;
+      thumbCanvas.height = thumbH;
+      const tCtx = thumbCanvas.getContext('2d');
+      tCtx.drawImage(img, 0, 0, thumbW, thumbH);
+      const thumbData = tCtx.getImageData(0, 0, thumbW, thumbH).data;
+
+      // Sample 4 corners (10x10 px each) to estimate background brightness
+      function sampleBrightness(x, y, size) {
+        let sum = 0, count = 0;
+        for (let dy = 0; dy < size; dy++) {
+          for (let dx = 0; dx < size; dx++) {
+            const px = ((y + dy) * thumbW + (x + dx)) * 4;
+            sum += 0.299 * thumbData[px] + 0.587 * thumbData[px+1] + 0.114 * thumbData[px+2];
+            count++;
+          }
+        }
+        return sum / count;
+      }
+
+      const CORNER = 6;
+      const bgBrightness = (
+        sampleBrightness(0, 0, CORNER) +
+        sampleBrightness(thumbW - CORNER, 0, CORNER) +
+        sampleBrightness(0, thumbH - CORNER, CORNER) +
+        sampleBrightness(thumbW - CORNER, thumbH - CORNER, CORNER)
+      ) / 4;
+
+      // The card should be significantly different from background
+      // Threshold: pixel is "card" if its brightness differs from bg by > 20
+      const THRESHOLD = 22;
+      function isCard(px) {
+        const gray = 0.299 * thumbData[px] + 0.587 * thumbData[px+1] + 0.114 * thumbData[px+2];
+        return Math.abs(gray - bgBrightness) > THRESHOLD;
+      }
+
+      // --- Step 2: find bounding box of card pixels ---
+      let minX = thumbW, maxX = 0, minY = thumbH, maxY = 0;
+      for (let y = 0; y < thumbH; y++) {
+        for (let x = 0; x < thumbW; x++) {
+          const px = (y * thumbW + x) * 4;
+          if (isCard(px)) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      // Validate crop (must be at least 20% of image)
+      const cropW = maxX - minX;
+      const cropH = maxY - minY;
+      const didCrop = cropW > thumbW * 0.2 && cropH > thumbH * 0.2 &&
+                      (minX > CORNER || minY > CORNER || maxX < thumbW - CORNER || maxY < thumbH - CORNER);
+
+      // Scale crop coords back to original image
+      let srcX = 0, srcY = 0, srcW = img.width, srcH = img.height;
+      if (didCrop) {
+        const PAD = 8; // padding in thumbnail pixels
+        srcX = Math.max(0, Math.round((minX - PAD) / thumbScale));
+        srcY = Math.max(0, Math.round((minY - PAD) / thumbScale));
+        srcW = Math.min(img.width  - srcX, Math.round((cropW + PAD * 2) / thumbScale));
+        srcH = Math.min(img.height - srcY, Math.round((cropH + PAD * 2) / thumbScale));
+
+        // Update preview to show cropped image
+        const prevCanvas = document.createElement('canvas');
+        prevCanvas.width  = srcW;
+        prevCanvas.height = srcH;
+        prevCanvas.getContext('2d').drawImage(img, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+        previewImg.src = prevCanvas.toDataURL();
+
+        // Show crop indicator
+        let indicator = document.getElementById('crop-indicator');
+        if (!indicator) {
+          indicator = document.createElement('span');
+          indicator.id = 'crop-indicator';
+          previewContainer.insertBefore(indicator, previewContainer.querySelector('button'));
+        }
+        indicator.textContent = '✂️ Wizytówka auto-przycinana';
+      } else {
+        const indicator = document.getElementById('crop-indicator');
+        if (indicator) indicator.remove();
+      }
+
+      // --- Step 3: render cropped area to final canvas with upscale + contrast ---
+      const TARGET_W = 1600;
+      const scale = Math.max(1, Math.min(4, TARGET_W / srcW));
+      const finalW = Math.round(srcW * scale);
+      const finalH = Math.round(srcH * scale);
+
       const canvas = document.createElement('canvas');
-      // Scale up small images for better OCR
-      const scale = Math.max(1, Math.min(3, 2000 / Math.max(img.width, img.height)));
-      canvas.width  = img.width  * scale;
-      canvas.height = img.height * scale;
+      canvas.width  = finalW;
+      canvas.height = finalH;
       const ctx = canvas.getContext('2d');
 
-      // Draw scaled image
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // Draw cropped & scaled image
+      ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, finalW, finalH);
 
       // Grayscale + contrast boost
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, finalW, finalH);
       const d = imageData.data;
       for (let i = 0; i < d.length; i += 4) {
-        // Grayscale
         const gray = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
-        // Contrast stretch: push darks darker, lights lighter
-        const contrast = 1.4;
+        const contrast = 1.5;
         const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
         const adjusted = Math.min(255, Math.max(0, factor * (gray - 128) + 128));
         d[i] = d[i+1] = d[i+2] = adjusted;
@@ -519,18 +612,39 @@ function parseBusinessCard(rawText) {
 
 // ---- FORM ----
 function populateForm(data, rawText) {
-  fName.value    = data.name    || '';
-  fCompany.value = data.company || '';
-  fTitle.value   = data.title   || '';
-  fPhone.value   = data.phone   || '';
-  fEmail.value   = data.email   || '';
-  fWebsite.value = data.website || '';
-  fAddress.value = data.address || '';
-  fNotes.value   = '';
+  // Fill fields and mark auto-filled ones with highlight class
+  function fill(el, val) {
+    el.value = val || '';
+    el.classList.toggle('ocr-filled', !!val);
+    // Remove highlight on manual edit
+    el.addEventListener('input', () => el.classList.remove('ocr-filled'), { once: true });
+  }
+
+  fill(fName,    data.name);
+  fill(fCompany, data.company);
+  fill(fTitle,   data.title);
+  fill(fPhone,   data.phone);
+  fill(fEmail,   data.email);
+  fill(fWebsite, data.website);
+  fill(fAddress, data.address);
+  fNotes.value = '';
+  fNotes.classList.remove('ocr-filled');
+
   rawOcrText.textContent = rawText || '';
   rawOcrText.classList.add('hidden');
   btnShowRaw.textContent = '👁 Pokaż surowy tekst OCR';
   saveStatus.textContent = '';
+
+  // Summary badge: how many fields filled
+  const filled = [data.name, data.company, data.title, data.phone, data.email, data.website, data.address]
+    .filter(Boolean).length;
+  const h2 = dataForm.querySelector('h2');
+  const badge = dataForm.querySelector('.ocr-badge') || document.createElement('span');
+  badge.className = 'ocr-badge';
+  badge.style.cssText = 'margin-left:10px;background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130,246,.3);border-radius:99px;padding:2px 10px;font-size:13px;font-weight:600;vertical-align:middle;';
+  badge.textContent = `${filled}/7 pól`;
+  if (!dataForm.querySelector('.ocr-badge')) h2.appendChild(badge);
+  else badge.textContent = `${filled}/7 pól`;
 }
 
 function cancelForm() {
