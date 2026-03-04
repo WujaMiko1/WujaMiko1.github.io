@@ -1,918 +1,613 @@
-/* =========================================
-   SKANER WIZYTÓWEK - LOGIKA APLIKACJI
-   ========================================= */
+﻿/* =====================================================
+   WIZYTĂ“WKOSKAN â€“ app.js  (full rewrite)
+   ===================================================== */
 
-'use strict';
+// â”€â”€ DOM REFS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const loginScreen      = document.getElementById('login-screen');
+const appWrapper       = document.getElementById('app');
+const loginPasswordEl  = document.getElementById('login-password');
+const loginErrorEl     = document.getElementById('login-error');
+const btnLogin         = document.getElementById('btn-login');
 
-// ---- STATE ----
-let currentImageFile = null;
-let contacts = [];
-let pendingDeleteId = null;
-let filteredContacts = [];
-
-// ---- DOM REFERENCES ----
-const fileInput        = document.getElementById('file-input');
-const previewContainer = document.getElementById('preview-container');
-const previewImg       = document.getElementById('preview-img');
-const btnClearImg      = document.getElementById('btn-clear-img');
-const btnScan          = document.getElementById('btn-scan');
-const ocrStatus        = document.getElementById('ocr-status');
-const progressFill     = document.getElementById('progress-fill');
-const ocrStatusText    = document.getElementById('ocr-status-text');
-const dataForm         = document.getElementById('data-form');
-const rawOcrText       = document.getElementById('raw-ocr-text');
-const btnShowRaw       = document.getElementById('btn-show-raw');
-const contactsTbody    = document.getElementById('contacts-tbody');
-const contactsEmpty    = document.getElementById('contacts-empty');
-const tableWrapper     = document.getElementById('table-wrapper');
-const searchInput      = document.getElementById('search-input');
 const settingsPanel    = document.getElementById('settings-panel');
 const btnSettings      = document.getElementById('btn-settings');
+const btnSync          = document.getElementById('btn-sync');
+const btnLogout        = document.getElementById('btn-logout');
+
+const sheetsUrlInput   = document.getElementById('sheets-url');
+const syncKeyInput     = document.getElementById('sync-key');
 const btnSaveSettings  = document.getElementById('btn-save-settings');
-const btnTestConn      = document.getElementById('btn-test-connection');
-const sheetsUrl        = document.getElementById('sheets-url');
-const connStatus       = document.getElementById('connection-status');
-const saveStatus       = document.getElementById('save-status');
-const toast            = document.getElementById('toast');
-const modalOverlay     = document.getElementById('modal-overlay');
-const modalConfirm     = document.getElementById('modal-confirm');
-const modalCancel      = document.getElementById('modal-cancel');
-const modalMessage     = document.getElementById('modal-message');
 
-// Form fields
-const fName    = document.getElementById('f-name');
-const fCompany = document.getElementById('f-company');
-const fTitle   = document.getElementById('f-title');
-const fPhone   = document.getElementById('f-phone');
-const fEmail   = document.getElementById('f-email');
-const fWebsite = document.getElementById('f-website');
-const fAddress = document.getElementById('f-address');
-const fNotes   = document.getElementById('f-notes');
+const newPasswordEl    = document.getElementById('new-password');
+const confirmPassEl    = document.getElementById('confirm-password');
+const btnChangePass    = document.getElementById('btn-change-password');
+const passwordStatus   = document.getElementById('password-status');
 
-// ---- INIT ----
-document.addEventListener('DOMContentLoaded', () => {
-  loadSettings();
-  loadContacts();
+const fileInput        = document.getElementById('file-input');
+const fileInput2       = document.getElementById('file-input-side2');
+const scanPreview      = document.getElementById('scan-preview');
+const btnScan          = document.getElementById('btn-scan');
+const ocrStatus        = document.getElementById('ocr-status');
+const cropIndicator    = document.getElementById('crop-indicator');
+const rawTextEl        = document.getElementById('raw-text');
+
+const twoSidedToggle   = document.getElementById('two-sided-toggle');
+const sideIndicators   = document.getElementById('side-indicators');
+const tabSide1         = document.getElementById('tab-side1');
+const tabSide2         = document.getElementById('tab-side2');
+const side2Prompt      = document.getElementById('side2-prompt');
+const btnSkipSide2     = document.getElementById('btn-skip-side2');
+
+const photo1Preview    = document.getElementById('photo1-preview');
+const photo2Preview    = document.getElementById('photo2-preview');
+const photo1Wrap       = document.getElementById('photo1-preview-wrap');
+const photo2Wrap       = document.getElementById('photo2-preview-wrap');
+
+const dataForm         = document.getElementById('data-form');
+const formFields       = {
+  name:    document.getElementById('f-name'),
+  company: document.getElementById('f-company'),
+  title:   document.getElementById('f-title'),
+  nip:     document.getElementById('f-nip'),
+  phone:   document.getElementById('f-phone'),
+  email:   document.getElementById('f-email'),
+  website: document.getElementById('f-website'),
+  address: document.getElementById('f-address'),
+  notes:   document.getElementById('f-notes'),
+};
+
+const btnSave          = document.getElementById('btn-save');
+const btnClear         = document.getElementById('btn-clear');
+
+const searchInput      = document.getElementById('search-input');
+const contactsBody     = document.getElementById('contacts-body');
+const contactCount     = document.getElementById('contact-count');
+const btnExport        = document.getElementById('btn-export');
+
+const lightbox         = document.getElementById('lightbox');
+const lightboxImg      = document.getElementById('lightbox-img');
+const lightboxLabel    = document.getElementById('lightbox-label');
+
+// â”€â”€ STATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+let contacts      = [];
+let editingId     = null;
+let currentFile   = null;
+let isTwoSided    = false;
+let currentSide   = 1;
+let side1Data     = null;
+let side2Data     = null;
+let side1Photo    = null;
+let side2Photo    = null;
+
+// â”€â”€ CRYPTO / AUTH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const DEFAULT_PASS   = 'admin';
+const STORAGE_HASH   = 'pwHash';
+const SESSION_KEY    = 'loggedIn';
+
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function getStoredHash() {
+  let h = localStorage.getItem(STORAGE_HASH);
+  if (!h) { h = await sha256(DEFAULT_PASS); localStorage.setItem(STORAGE_HASH, h); }
+  return h;
+}
+
+async function attemptLogin() {
+  const pw = loginPasswordEl.value;
+  const [hash, stored] = await Promise.all([sha256(pw), getStoredHash()]);
+  if (hash === stored) {
+    sessionStorage.setItem(SESSION_KEY, '1');
+    loginScreen.classList.add('hidden');
+    appWrapper.classList.remove('hidden');
+    onAppStart();
+  } else {
+    loginErrorEl.textContent = 'BĹ‚Ä™dne hasĹ‚o. SprĂłbuj ponownie.';
+    loginPasswordEl.value = '';
+    loginPasswordEl.focus();
+  }
+}
+
+if (btnLogin) btnLogin.addEventListener('click', attemptLogin);
+if (loginPasswordEl) loginPasswordEl.addEventListener('keydown', e => { if (e.key === 'Enter') attemptLogin(); });
+
+if (btnLogout) btnLogout.addEventListener('click', () => {
+  sessionStorage.removeItem(SESSION_KEY);
+  appWrapper.classList.add('hidden');
+  loginScreen.classList.remove('hidden');
+  loginPasswordEl.value = '';
+  loginErrorEl.textContent  = '';
+});
+
+if (btnChangePass) btnChangePass.addEventListener('click', async () => {
+  const np = newPasswordEl.value.trim();
+  const cp = confirmPassEl.value.trim();
+  if (!np) { passwordStatus.textContent = 'Wpisz nowe hasĹ‚o.'; passwordStatus.style.color = 'var(--danger)'; return; }
+  if (np !== cp) { passwordStatus.textContent = 'HasĹ‚a nie sÄ… zgodne.'; passwordStatus.style.color = 'var(--danger)'; return; }
+  if (np.length < 4) { passwordStatus.textContent = 'Min. 4 znaki.'; passwordStatus.style.color = 'var(--danger)'; return; }
+  localStorage.setItem(STORAGE_HASH, await sha256(np));
+  newPasswordEl.value = ''; confirmPassEl.value = '';
+  passwordStatus.textContent = 'âś“ HasĹ‚o zmienione!';
+  passwordStatus.style.color = 'var(--success)';
+  setTimeout(() => { passwordStatus.textContent = ''; }, 3000);
+});
+
+// â”€â”€ SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (btnSettings) btnSettings.addEventListener('click', () => {
+  const open = settingsPanel.style.display !== 'none';
+  settingsPanel.style.display = open ? 'none' : 'block';
+  if (!open) {
+    sheetsUrlInput.value = localStorage.getItem('sheetsUrl') || '';
+    syncKeyInput.value   = localStorage.getItem('syncKey')   || '';
+  }
+});
+
+if (btnSaveSettings) btnSaveSettings.addEventListener('click', () => {
+  localStorage.setItem('sheetsUrl', sheetsUrlInput.value.trim());
+  localStorage.setItem('syncKey',   syncKeyInput.value.trim());
+  settingsPanel.style.display = 'none';
+  showToast('Ustawienia zapisane!');
+});
+
+// â”€â”€ TOAST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function showToast(msg, type = 'success') {
+  let t = document.getElementById('toast-msg');
+  if (!t) {
+    t = document.createElement('div'); t.id = 'toast-msg';
+    Object.assign(t.style, {
+      position:'fixed', bottom:'24px', left:'50%',
+      transform:'translateX(-50%) translateY(100px)',
+      padding:'10px 22px', borderRadius:'99px',
+      fontWeight:'600', fontSize:'14px', zIndex:'5000',
+      transition:'transform .3s', pointerEvents:'none', color:'#fff',
+    });
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = type === 'success' ? '#22c55e' : '#ef4444';
+  requestAnimationFrame(() => {
+    t.style.transform = 'translateX(-50%) translateY(0)';
+    setTimeout(() => { t.style.transform = 'translateX(-50%) translateY(100px)'; }, 2800);
+  });
+}
+
+// â”€â”€ APP START â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function onAppStart() {
+  contacts = loadContacts();
   renderTable();
-  bindEvents();
-  registerSW();
-});
+  syncFromSheets();
+}
 
-// ---- SERVICE WORKER ----
-function registerSW() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+window.addEventListener('DOMContentLoaded', async () => {
+  await getStoredHash();
+  if (sessionStorage.getItem(SESSION_KEY)) {
+    loginScreen.classList.add('hidden');
+    appWrapper.classList.remove('hidden');
+    onAppStart();
+  } else {
+    loginScreen.classList.remove('hidden');
+    appWrapper.classList.add('hidden');
   }
-}
-
-// ---- SETTINGS ----
-function loadSettings() {
-  sheetsUrl.value = localStorage.getItem('sheetsUrl') || '';
-}
-
-btnSettings.addEventListener('click', () => {
-  settingsPanel.classList.toggle('hidden');
+  if (loginPasswordEl) loginPasswordEl.focus();
 });
 
-btnSaveSettings.addEventListener('click', () => {
-  const url = sheetsUrl.value.trim();
-  localStorage.setItem('sheetsUrl', url);
-  showToast('✅ Ustawienia zapisane!', 'success');
-  connStatus.textContent = '';
-});
-
-btnTestConn.addEventListener('click', async () => {
-  const url = sheetsUrl.value.trim();
-  if (!url) {
-    setStatus(connStatus, '⚠️ Podaj URL Apps Script.', 'error');
-    return;
-  }
-  setStatus(connStatus, '🔄 Testowanie połączenia...', 'info');
-  try {
-    await sendToSheets({ name: 'TEST', company: 'TEST', _test: true }, url);
-    setStatus(connStatus, '✅ Połączenie działa! Dane trafią do Sheets.', 'success');
-  } catch (e) {
-    setStatus(connStatus, '✅ Żądanie wysłane (no-cors). Sprawdź arkusz czy pojawił się wiersz TEST.', 'success');
-  }
-});
-
-// ---- FILE INPUT ----
-function bindEvents() {
-  fileInput.addEventListener('change', handleFileSelect);
-  btnClearImg.addEventListener('click', clearImage);
-  btnScan.addEventListener('click', runOCR);
-  btnShowRaw.addEventListener('click', toggleRawOcr);
-  document.getElementById('btn-save-contact').addEventListener('click', saveContact);
-  document.getElementById('btn-cancel-form').addEventListener('click', cancelForm);
-  document.getElementById('btn-export-csv').addEventListener('click', exportCSV);
-  document.getElementById('btn-clear-all').addEventListener('click', confirmClearAll);
-  searchInput.addEventListener('input', handleSearch);
-  modalConfirm.addEventListener('click', executeDelete);
-  modalCancel.addEventListener('click', closeModal);
-
-  // Drag & drop on desktop
-  const dropZone = document.getElementById('drop-zone');
-  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
-  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-  dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('dragover');
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) loadImage(file);
-  });
-}
-
-function handleFileSelect(e) {
-  const file = e.target.files[0];
-  if (file) loadImage(file);
-}
-
-function loadImage(file) {
-  currentImageFile = file;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    previewImg.src = e.target.result;
-    previewContainer.classList.remove('hidden');
-    document.getElementById('drop-zone').classList.add('hidden');
-    btnScan.classList.remove('hidden');
-    dataForm.classList.add('hidden');
-    ocrStatus.classList.add('hidden');
-  };
-  reader.readAsDataURL(file);
-}
-
-function clearImage() {
-  currentImageFile = null;
-  previewImg.src = '';
-  previewContainer.classList.add('hidden');
-  document.getElementById('drop-zone').classList.remove('hidden');
-  btnScan.classList.add('hidden');
-  ocrStatus.classList.add('hidden');
-  dataForm.classList.add('hidden');
-  fileInput.value = '';
-}
-
-// ---- SMART CARD DETECTION + CROP + PRE-PROCESS ----
-function preprocessImage(file) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      // --- Step 1: sample-based card detection on small thumbnail ---
-      const THUMB = 300; // work on 300px wide thumbnail for speed
-      const thumbScale = THUMB / img.width;
-      const thumbW = THUMB;
-      const thumbH = Math.round(img.height * thumbScale);
-
-      const thumbCanvas = document.createElement('canvas');
-      thumbCanvas.width  = thumbW;
-      thumbCanvas.height = thumbH;
-      const tCtx = thumbCanvas.getContext('2d');
-      tCtx.drawImage(img, 0, 0, thumbW, thumbH);
-      const thumbData = tCtx.getImageData(0, 0, thumbW, thumbH).data;
-
-      // Sample 4 corners (10x10 px each) to estimate background brightness
-      function sampleBrightness(x, y, size) {
-        let sum = 0, count = 0;
-        for (let dy = 0; dy < size; dy++) {
-          for (let dx = 0; dx < size; dx++) {
-            const px = ((y + dy) * thumbW + (x + dx)) * 4;
-            sum += 0.299 * thumbData[px] + 0.587 * thumbData[px+1] + 0.114 * thumbData[px+2];
-            count++;
-          }
-        }
-        return sum / count;
-      }
-
-      const CORNER = 6;
-      const bgBrightness = (
-        sampleBrightness(0, 0, CORNER) +
-        sampleBrightness(thumbW - CORNER, 0, CORNER) +
-        sampleBrightness(0, thumbH - CORNER, CORNER) +
-        sampleBrightness(thumbW - CORNER, thumbH - CORNER, CORNER)
-      ) / 4;
-
-      // The card should be significantly different from background
-      // Threshold: pixel is "card" if its brightness differs from bg by > 20
-      const THRESHOLD = 22;
-      function isCard(px) {
-        const gray = 0.299 * thumbData[px] + 0.587 * thumbData[px+1] + 0.114 * thumbData[px+2];
-        return Math.abs(gray - bgBrightness) > THRESHOLD;
-      }
-
-      // --- Step 2: find bounding box of card pixels ---
-      let minX = thumbW, maxX = 0, minY = thumbH, maxY = 0;
-      for (let y = 0; y < thumbH; y++) {
-        for (let x = 0; x < thumbW; x++) {
-          const px = (y * thumbW + x) * 4;
-          if (isCard(px)) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          }
-        }
-      }
-
-      // Validate crop (must be at least 20% of image)
-      const cropW = maxX - minX;
-      const cropH = maxY - minY;
-      const didCrop = cropW > thumbW * 0.2 && cropH > thumbH * 0.2 &&
-                      (minX > CORNER || minY > CORNER || maxX < thumbW - CORNER || maxY < thumbH - CORNER);
-
-      // Scale crop coords back to original image
-      let srcX = 0, srcY = 0, srcW = img.width, srcH = img.height;
-      if (didCrop) {
-        const PAD = 8; // padding in thumbnail pixels
-        srcX = Math.max(0, Math.round((minX - PAD) / thumbScale));
-        srcY = Math.max(0, Math.round((minY - PAD) / thumbScale));
-        srcW = Math.min(img.width  - srcX, Math.round((cropW + PAD * 2) / thumbScale));
-        srcH = Math.min(img.height - srcY, Math.round((cropH + PAD * 2) / thumbScale));
-
-        // Update preview to show cropped image
-        const prevCanvas = document.createElement('canvas');
-        prevCanvas.width  = srcW;
-        prevCanvas.height = srcH;
-        prevCanvas.getContext('2d').drawImage(img, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
-        previewImg.src = prevCanvas.toDataURL();
-
-        // Show crop indicator
-        let indicator = document.getElementById('crop-indicator');
-        if (!indicator) {
-          indicator = document.createElement('span');
-          indicator.id = 'crop-indicator';
-          previewContainer.insertBefore(indicator, previewContainer.querySelector('button'));
-        }
-        indicator.textContent = '✂️ Wizytówka auto-przycinana';
-      } else {
-        const indicator = document.getElementById('crop-indicator');
-        if (indicator) indicator.remove();
-      }
-
-      // --- Step 3: render cropped area to final canvas with upscale + contrast ---
-      const TARGET_W = 1600;
-      const scale = Math.max(1, Math.min(4, TARGET_W / srcW));
-      const finalW = Math.round(srcW * scale);
-      const finalH = Math.round(srcH * scale);
-
-      const canvas = document.createElement('canvas');
-      canvas.width  = finalW;
-      canvas.height = finalH;
-      const ctx = canvas.getContext('2d');
-
-      // Draw cropped & scaled image
-      ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, finalW, finalH);
-
-      // Grayscale + contrast boost
-      const imageData = ctx.getImageData(0, 0, finalW, finalH);
-      const d = imageData.data;
-      for (let i = 0; i < d.length; i += 4) {
-        const gray = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
-        const contrast = 1.5;
-        const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
-        const adjusted = Math.min(255, Math.max(0, factor * (gray - 128) + 128));
-        d[i] = d[i+1] = d[i+2] = adjusted;
-      }
-      ctx.putImageData(imageData, 0, 0);
-
-      canvas.toBlob(blob => resolve(blob), 'image/png');
+// â”€â”€ IMAGE HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function resizeImageToBase64(file, maxW = 800) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', 0.75));
+      };
+      img.src = e.target.result;
     };
-    img.src = URL.createObjectURL(file);
+    reader.readAsDataURL(file);
   });
 }
 
-// ---- OCR ----
-async function runOCR() {
-  if (!currentImageFile) return;
+// â”€â”€ IMAGE PREPROCESSING (auto-crop + contrast) â”€â”€â”€â”€â”€â”€â”€â”€
+function preprocessImage(file) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const SCALE = 0.5;
+        const cDet = document.createElement('canvas');
+        cDet.width = Math.round(img.width * SCALE);
+        cDet.height = Math.round(img.height * SCALE);
+        const ctxD = cDet.getContext('2d');
+        ctxD.drawImage(img, 0, 0, cDet.width, cDet.height);
+        const data = ctxD.getImageData(0, 0, cDet.width, cDet.height).data;
 
-  btnScan.disabled = true;
-  ocrStatus.classList.remove('hidden');
-  dataForm.classList.add('hidden');
-  setProgress(0, 'Przetwarzanie obrazu...');
-
-  try {
-    // Pre-process image for better OCR
-    setProgress(10, 'Poprawa kontrastu obrazu...');
-    const processedBlob = await preprocessImage(currentImageFile);
-
-    setProgress(20, 'Ładowanie silnika OCR...');
-    const worker = await Tesseract.createWorker(['pol', 'eng'], 1, {
-      logger: (m) => {
-        if (m.status === 'recognizing text') {
-          setProgress(50 + Math.round(m.progress * 45), `Rozpoznawanie tekstu... ${50 + Math.round(m.progress * 45)}%`);
-        } else if (m.status === 'loading language traineddata') {
-          setProgress(25, 'Ładowanie danych językowych...');
-        } else if (m.status === 'initializing api') {
-          setProgress(40, 'Inicjalizacja OCR...');
+        function sampleCorner(cx, cy) {
+          let sum = 0, cnt = 0;
+          for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+            const idx = ((cy + dy) * cDet.width + (cx + dx)) * 4;
+            if (idx >= 0 && idx < data.length) { sum += (data[idx]+data[idx+1]+data[idx+2])/3; cnt++; }
+          }
+          return cnt ? sum/cnt : 255;
         }
-      }
+
+        const bgBr = (sampleCorner(5,5)+sampleCorner(cDet.width-6,5)+sampleCorner(5,cDet.height-6)+sampleCorner(cDet.width-6,cDet.height-6))/4;
+        const THRESH = 22;
+        let minX=cDet.width, maxX=0, minY=cDet.height, maxY=0, foundCard=false;
+        for (let y=0;y<cDet.height;y++) for (let x=0;x<cDet.width;x++) {
+          const idx=(y*cDet.width+x)*4;
+          if (Math.abs((data[idx]+data[idx+1]+data[idx+2])/3-bgBr)>THRESH) {
+            if (x<minX)minX=x; if (x>maxX)maxX=x;
+            if (y<minY)minY=y; if (y>maxY)maxY=y;
+            foundCard=true;
+          }
+        }
+
+        const PAD=8;
+        let sx=0,sy=0,sw=img.width,sh=img.height;
+        if (foundCard) {
+          const f=1/SCALE;
+          sx=Math.max(0,Math.round((minX-PAD)*f));
+          sy=Math.max(0,Math.round((minY-PAD)*f));
+          sw=Math.min(img.width, Math.round((maxX-minX+PAD*2)*f));
+          sh=Math.min(img.height,Math.round((maxY-minY+PAD*2)*f));
+          if (cropIndicator) { cropIndicator.textContent='âś‚ Auto-kadrowanie'; cropIndicator.style.display='inline-block'; setTimeout(()=>{cropIndicator.style.display='none';},3000); }
+        }
+
+        const UPSCALE=4;
+        const cOcr=document.createElement('canvas');
+        cOcr.width=sw*UPSCALE; cOcr.height=sh*UPSCALE;
+        const ctxO=cOcr.getContext('2d');
+        ctxO.imageSmoothingEnabled=true; ctxO.imageSmoothingQuality='high';
+        ctxO.drawImage(img,sx,sy,sw,sh,0,0,cOcr.width,cOcr.height);
+        const id=ctxO.getImageData(0,0,cOcr.width,cOcr.height);
+        const d=id.data, C=1.6, IC=128*(1-C);
+        for (let i=0;i<d.length;i+=4){
+          const g=Math.min(255,Math.max(0,Math.round((d[i]*.299+d[i+1]*.587+d[i+2]*.114)*C+IC)));
+          d[i]=d[i+1]=d[i+2]=g;
+        }
+        ctxO.putImageData(id,0,0);
+
+        if (scanPreview) {
+          const pv=document.createElement('canvas'), ms=Math.min(1,400/sw);
+          pv.width=Math.round(sw*ms); pv.height=Math.round(sh*ms);
+          pv.getContext('2d').drawImage(img,sx,sy,sw,sh,0,0,pv.width,pv.height);
+          scanPreview.src=pv.toDataURL(); scanPreview.style.display='block';
+        }
+
+        cOcr.toBlob(blob => resolve(blob),'image/png');
+      };
+      img.src=ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// â”€â”€ TWO-SIDED â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (twoSidedToggle) twoSidedToggle.addEventListener('change', () => {
+  isTwoSided = twoSidedToggle.checked;
+  if (sideIndicators) sideIndicators.style.display = isTwoSided ? 'flex' : 'none';
+  if (!isTwoSided) { side1Data=null; side2Data=null; side1Photo=null; side2Photo=null; currentSide=1; if(side2Prompt)side2Prompt.style.display='none'; }
+});
+
+window.switchSideTab = function(n) {
+  currentSide = n;
+  if (tabSide1) tabSide1.classList.toggle('active', n===1);
+  if (tabSide2) tabSide2.classList.toggle('active', n===2);
+};
+
+// â”€â”€ FILE INPUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (fileInput) fileInput.addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  currentFile = f;
+  scanPreview.src = URL.createObjectURL(f);
+  scanPreview.style.display = 'block';
+  if (btnScan) btnScan.disabled = false;
+});
+
+if (fileInput2) fileInput2.addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  side2Photo = await resizeImageToBase64(f, 800);
+  await runOcrOnFile(f, 2);
+  if (side2Prompt) side2Prompt.style.display = 'none';
+  if (tabSide2) tabSide2.classList.add('done');
+  mergeAndPopulate();
+});
+
+if (btnSkipSide2) btnSkipSide2.addEventListener('click', () => {
+  if (side2Prompt) side2Prompt.style.display = 'none';
+  mergeAndPopulate();
+});
+
+// â”€â”€ OCR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (btnScan) btnScan.addEventListener('click', async () => {
+  if (!currentFile) return;
+  await runOcrOnFile(currentFile, currentSide);
+});
+
+async function runOcrOnFile(file, side) {
+  if (ocrStatus) { ocrStatus.textContent = `Skanowanie strony ${side}â€¦`; ocrStatus.style.display='block'; }
+  if (btnScan) btnScan.disabled = true;
+  try {
+    const blob = await preprocessImage(file);
+    const { data: { text } } = await Tesseract.recognize(blob, 'pol+eng', {
+      logger: m => { if (m.status==='recognizing text' && ocrStatus) ocrStatus.textContent=`Strona ${side}: OCR ${Math.round(m.progress*100)}%â€¦`; }
     });
-
-    // Configure for business cards
-    await worker.setParameters({
-      tessedit_pageseg_mode: '6', // Assume uniform block of text
-    });
-
-    setProgress(50, 'Analiza obrazu...');
-    const { data: { text } } = await worker.recognize(processedBlob);
-    await worker.terminate();
-
-    setProgress(100, 'Gotowe!');
-    setTimeout(() => ocrStatus.classList.add('hidden'), 500);
-
     const parsed = parseBusinessCard(text);
-    populateForm(parsed, text);
-    dataForm.classList.remove('hidden');
-    dataForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
+    if (rawTextEl) rawTextEl.value = text;
+    if (side === 1) {
+      side1Data = parsed;
+      side1Photo = await resizeImageToBase64(file, 800);
+      if (tabSide1) tabSide1.classList.add('done');
+      if (isTwoSided) {
+        if (ocrStatus) ocrStatus.textContent = 'Strona 1 gotowa. Teraz zeskanuj stronÄ™ 2.';
+        if (side2Prompt) side2Prompt.style.display = 'block';
+        switchSideTab(2);
+      } else { mergeAndPopulate(); }
+    } else {
+      side2Data = parsed;
+      mergeAndPopulate();
+    }
   } catch (err) {
     console.error(err);
-    setProgress(0, '❌ Błąd OCR. Spróbuj ponownie.');
-    showToast('❌ Błąd skanowania. Spróbuj z lepszym zdjęciem.', 'error');
+    if (ocrStatus) ocrStatus.textContent = 'BĹ‚Ä…d OCR: ' + err.message;
+  } finally {
+    if (btnScan) btnScan.disabled = false;
   }
-
-  btnScan.disabled = false;
 }
 
-function setProgress(pct, text) {
-  progressFill.style.width = pct + '%';
-  ocrStatusText.textContent = text;
+function mergeAndPopulate() {
+  const merged = Object.assign({}, side1Data || {});
+  if (side2Data) { for (const [k,v] of Object.entries(side2Data)) { if (v && !merged[k]) merged[k]=v; } }
+  populateForm(merged);
+  if (dataForm) dataForm.style.display = 'block';
+  if (ocrStatus) ocrStatus.textContent = isTwoSided ? 'Scalono dane z obu stron.' : `Zeskanowano pola.`;
+  if (side1Photo && photo1Preview) { photo1Preview.src=side1Photo;  if(photo1Wrap)photo1Wrap.classList.remove('hidden'); }
+  if (side2Photo && photo2Preview) { photo2Preview.src=side2Photo; if(photo2Wrap)photo2Wrap.classList.remove('hidden'); }
 }
 
-// ---- PARSER ----
-
-// Pre-process raw OCR text to fix common mistakes
+// â”€â”€ PARSER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function fixOcrText(raw) {
-  return raw
-    // Fix @-sign alternatives (OCR often misreads @)
-    .replace(/\[at\]/gi, '@')
-    .replace(/\(at\)/gi, '@')
-    .replace(/\[At\]/gi, '@')
-    .replace(/ at ([a-z])/gi, '@$1')
-    // Fix broken phone separators
-    .replace(/(\d)\s*[—–−]\s*(\d)/g, '$1-$2')
-    // Fix extra spaces in emails
-    .replace(/([a-z0-9._%+\-]+)\s*@\s*([a-z0-9.\-]+\.[a-z]{2,})/gi, '$1@$2')
-    // Common OCR digit/letter swaps in words (only outside emails/phones)
-    .replace(/(?<![a-z0-9@])0(?=[a-z])/gi, 'O')  // 0raz → Oraz (very conservative)
-    .trim();
+  return raw.replace(/\[at\]|\(at\)|\bat\b/gi,'@').replace(/\[dot\]|\(dot\)/gi,'.').replace(/[\u2022\u2023\u25E6\u2043\u2219|â€˘â—¦â—Ź]/g,'\n');
 }
 
 function parseBusinessCard(rawText) {
-  const fixed = fixOcrText(rawText);
+  const fixed  = fixOcrText(rawText);
+  const lines  = fixed.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const joined = lines.join(' ');
+  const result = { name:'', company:'', title:'', nip:'', phone:'', email:'', website:'', address:'', notes:'' };
+  const used   = new Set();
 
-  // Lines: cleaned, non-empty (min 2 chars)
-  const lines = fixed
-    .split('\n')
-    .map(l => l.trim())
-    .filter(l => l.length > 1);
+  // EMAIL
+  const em = joined.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  if (em) { result.email=em[0].toLowerCase(); lines.forEach((l,i)=>{if(l.includes(em[0]))used.add(i);}); }
 
-  const result = { name: '', company: '', title: '', phone: '', email: '', website: '', address: '' };
-  const used = new Set();
+  // NIP
+  const nipM = joined.match(/NIP[\s:.\-]*(\d[\s\-]*\d[\s\-]*\d[\s\-]*\d[\s\-]*\d[\s\-]*\d[\s\-]*\d[\s\-]*\d[\s\-]*\d[\s\-]*\d)/i);
+  if (nipM) { result.nip=nipM[1].replace(/[\s\-]/g,''); lines.forEach((l,i)=>{if(/NIP/i.test(l))used.add(i);}); }
+  else { for (let i=0;i<lines.length;i++) { if(used.has(i))continue; const m=lines[i].match(/^\s*\d{10}\s*$/); if(m){result.nip=m[0].trim();used.add(i);break;} } }
 
-  // ================================================================
-  // 1. EMAIL — search full joined text (catches split-line emails)
-  // ================================================================
-  const joinedText = lines.join(' ');
-  const emailMatch = joinedText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
-  if (emailMatch) {
-    result.email = emailMatch[0].toLowerCase();
-    // Mark the line(s) containing @ as used
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('@')) { used.add(i); break; }
-    }
-  }
+  // PHONE
+  const phoneP=[/(?:\+48[\s\-]?)?\d{3}[\s\-]\d{3}[\s\-]\d{3}/,/(?:\+48[\s\-]?)?\d{3}[\s\-]\d{3}[\s\-]\d{2}[\s\-]\d{2}/,/(?:\+48[\s\-]?)?\d{2}[\s\-]\d{3}[\s\-]\d{2}[\s\-]\d{2}/,/\+?48\d{9}/,/\d{9}/,/\+\d{1,3}[\s\-]\d{2,}[\s\-\d]{4,}/];
+  for (let i=0;i<lines.length&&!result.phone;i++) { if(used.has(i))continue; const l=lines[i].replace(/tel[\s.:]*|phone[\s.:]*|mob[\s.:]*/gi,'').trim(); for(const p of phoneP){const m=l.match(p);if(m){result.phone=m[0].replace(/\s+/g,' ').trim();used.add(i);break;}} }
+  if (!result.phone) { for(const p of phoneP){const m=joined.match(p);if(m){result.phone=m[0].trim();break;}} }
 
-  // ================================================================
-  // 2. PHONE — multiple Polish/international patterns
-  // ================================================================
-  const PHONE_PATTERNS = [
-    // +48 mobile/landline
-    /(?:\+48|0048)[\s.\-]?(?:\d[\s.\-]?){9}/,
-    // 9-digit Polish mobile: 123 456 789 or 123-456-789
-    /(?<!\d)\d{3}[\s.\-]\d{3}[\s.\-]\d{3}(?!\d)/,
-    // Polish landline: 12 345 67 89
-    /(?<!\d)\d{2}[\s.\-]\d{3}[\s.\-]\d{2}[\s.\-]\d{2}(?!\d)/,
-    // 9 digits no separator
-    /(?<!\d)\d{9}(?!\d)/,
-    // International: +XX XXX XXX XXX
-    /\+\d{1,3}[\s.\-]?\d{2,4}[\s.\-]?\d{2,4}[\s.\-]?\d{2,4}/,
-    // Generic: mostly digits, some separators
-    /(?<!\d)[\d]{2,4}[\s.\-][\d]{2,4}[\s.\-][\d]{2,4}(?!\d)/,
-  ];
+  // WEBSITE
+  const webP=[/(?:www\.)[a-zA-Z0-9\-]+(?:\.[a-zA-Z]{2,})+(?:\/[^\s]*)*/i,/(?:https?:\/\/)[a-zA-Z0-9\-]+(?:\.[a-zA-Z]{2,})+(?:\/[^\s]*)*/i,/[a-zA-Z0-9\-]{2,}\.(?:pl|com|eu|net|org|io|co)(?:\/[^\s]*){0,2}/i];
+  for (let i=0;i<lines.length&&!result.website;i++) { if(used.has(i)||lines[i].includes('@'))continue; for(const p of webP){const m=lines[i].match(p);if(m){let w=m[0].trim().toLowerCase();if(!w.startsWith('http'))w='https://'+w;result.website=w;used.add(i);break;}} }
+  if (!result.website) { for(const p of webP){const m=joined.match(p);if(m&&!m[0].includes('@')){let w=m[0].trim().toLowerCase();if(!w.startsWith('http'))w='https://'+w;result.website=w;break;}} }
 
-  for (let i = 0; i < lines.length; i++) {
-    if (used.has(i)) continue;
-    const line = lines[i];
-    for (const pat of PHONE_PATTERNS) {
-      const m = line.match(pat);
-      if (m) {
-        const digits = m[0].replace(/\D/g, '');
-        if (digits.length >= 7 && digits.length <= 15) {
-          result.phone = m[0].trim();
-          used.add(i);
-          break;
-        }
-      }
-    }
-    if (result.phone) break;
-  }
+  // JOB TITLE
+  const titleKw=['prezes','dyrektor','kierownik','manager','specjalista','doradca','konsultant','handlowiec','inĹĽynier','technolog','konstruktor','projektant','analityk','koordynator','asystent','sekretarz','recepcjonista','administrator','programista','developer','grafik','architekt','prawnik','radca','adwokat','accountant','ksiÄ™gowy','sales','advisor','engineer','designer','consultant','officer','executive','president','vice','head','chief','cto','ceo','coo','cfo','representative','supervisor'];
+  for (let i=0;i<lines.length;i++) { if(used.has(i))continue; const ll=lines[i].toLowerCase(); if(titleKw.some(k=>ll.includes(k))){result.title=lines[i];used.add(i);break;} }
 
-  // Fallback: line is 7-15 digits (+separators), nothing else significant
-  if (!result.phone) {
-    for (let i = 0; i < lines.length; i++) {
-      if (used.has(i)) continue;
-      const stripped = lines[i].replace(/[\s\-+().]/g, '');
-      if (/^\d{7,15}$/.test(stripped)) {
-        result.phone = lines[i].trim();
-        used.add(i);
-        break;
-      }
-    }
-  }
+  // COMPANY
+  const compKw=['sp. z o.o.','sp.z o.o.','spĂłĹ‚ka','s.a.','ltd','llc','gmbh','sas','inc','corp','group','holding','solutions','services','systems','technologies','tech','consulting','software','digital','media','studio','agency','center','centre','labs','industries','next','cnc','numerical control','computer'];
+  for (let i=0;i<lines.length;i++) { if(used.has(i))continue; const ll=lines[i].toLowerCase(); if(compKw.some(k=>ll.includes(k))){result.company=lines[i];used.add(i);break;} }
+  if (!result.company) { for(let i=0;i<lines.length;i++){if(used.has(i))continue;const l=lines[i];if(l===l.toUpperCase()&&l.length>=3&&l.length<=40&&/[A-ZĹ»ĹąÄ†Ä„ĹšÄĹĂ“Ĺ]/.test(l)){result.company=l;used.add(i);break;}} }
 
-  // ================================================================
-  // 3. WEBSITE — various formats
-  // ================================================================
-  const WEB_PATTERNS = [
-    /https?:\/\/[\w\-]+(?:\.[\w\-]+)+(?:\/[^\s,;]*)*/i,
-    /www\.[\w\-]+(?:\.[\w\-]+)+(?:\/[^\s,;]*)*/i,
-    /[\w\-]{2,}\.(?:pl|com|net|org|eu|io|biz|info|co\.uk|com\.pl)(?:\/[^\s,;]*)*/i,
-  ];
+  // ADDRESS
+  const addrKw=['ul.','ulica','al.','aleja','os.','osiedle','plac','rynek','str.','street','avenue','road','blvd','suite','floor'];
+  for (let i=0;i<lines.length;i++) { if(used.has(i))continue; const ll=lines[i].toLowerCase(); if(addrKw.some(k=>ll.startsWith(k))||/\d{2}-\d{3}/.test(lines[i])){result.address=[lines[i],lines[i+1]].filter(Boolean).join(', ');used.add(i);if(i+1<lines.length&&/\d{2}-\d{3}/.test(lines[i+1]))used.add(i+1);break;} }
 
-  for (let i = 0; i < lines.length; i++) {
-    if (used.has(i)) continue;
-    for (const pat of WEB_PATTERNS) {
-      const m = lines[i].match(pat);
-      if (m) {
-        const candidate = m[0].replace(/[.,;]+$/, '');
-        // Not an email, must contain a dot
-        if (!candidate.includes('@') && candidate.includes('.') && candidate.length > 4) {
-          result.website = candidate;
-          used.add(i);
-          break;
-        }
-      }
-    }
-    if (result.website) break;
-  }
+  // NAME
+  const nameRx=/^[A-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»][a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽ]+(?:[\s\-][A-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»][a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽ]+)+$/;
+  for (let i=0;i<lines.length;i++) { if(used.has(i))continue; if(nameRx.test(lines[i])){result.name=lines[i];used.add(i);break;} }
+  if (!result.name) { for(let i=0;i<lines.length;i++){if(used.has(i))continue;const w=lines[i].split(/\s+/);if(w.length===2&&lines[i]!==lines[i].toUpperCase()&&lines[i].length<50){result.name=lines[i];used.add(i);break;}} }
 
-  // ================================================================
-  // 4. JOB TITLE — keyword-based
-  // ================================================================
-  const JOB_KW = [
-    // Polish
-    'dyrektor', 'kierownik', 'prezes', 'wiceprezes', 'właściciel', 'współwłaściciel',
-    'specjalista', 'starszy specjalista', 'główny specjalista',
-    'koordynator', 'asystent', 'asystentka', 'sekretarz', 'sekretarka',
-    'konsultant', 'doradca', 'analityk', 'administrator',
-    'programista', 'inżynier', 'projektant', 'grafik',
-    'handlowiec', 'przedstawiciel handlowy', 'przedstawiciel', 'agent', 'broker', 'pośrednik',
-    'księgowy', 'księgowa', 'prawnik', 'adwokat', 'radca', 'notariusz',
-    'lekarz', 'pielęgniarka', 'farmaceuta', 'nauczyciel', 'wykładowca',
-    'szef', 'naczelnik', 'kierowca', 'operator', 'technik', 'montażysta',
-    'architekt', 'geodeta', 'rzeczoznawca', 'biegły',
-    'dr ', 'dr.', 'prof.', 'prof ', 'mgr ', 'mgr.', 'inż.', 'lic.',
-    // English
-    'ceo', 'cto', 'cfo', 'coo', 'cmo', 'vp ', 'vice president',
-    'director', 'manager', 'president', 'founder', 'partner', 'officer',
-    'executive', 'supervisor', 'engineer', 'developer', 'designer',
-    'analyst', 'consultant', 'specialist', 'coordinator', 'assistant',
-    'sales', 'accountant', 'attorney', 'lawyer', 'head of', 'lead ',
-    'senior ', 'junior ', 'intern',
-  ];
-
-  for (let i = 0; i < lines.length; i++) {
-    if (used.has(i)) continue;
-    const lower = lines[i].toLowerCase();
-    if (JOB_KW.some(kw => lower.includes(kw))) {
-      result.title = lines[i].trim();
-      used.add(i);
-      break;
-    }
-  }
-
-  // ================================================================
-  // 5. COMPANY — legal suffixes + ALL-CAPS heuristic
-  // ================================================================
-  const CO_KW = [
-    // Polish legal forms
-    'sp. z o.o', 'sp.z o.o', 'sp. z o.o.', 'spółka z o.o', 'spółka akcyjna',
-    's.a.', ' s.a,', 's.c.', 's.j.', 's.k.', 's.k.a.', ' sp.k', 'spzoo',
-    // International
-    ' ltd', ' limited', ' gmbh', ' ag,', ' ag ', ' inc.', ' inc,', ' corp.', ' corp,',
-    ' llc', ' llp', ' bv ', ' nv ',
-    // Generic business words
-    'group', 'holding', 'studio', 'agencja', 'agency', 'instytut', 'institute',
-    'fundacja', 'foundation', 'solutions', 'technologies', 'technology',
-    'systems', 'services', 'consulting', 'ventures', 'investments', 'capital',
-    'logistics', 'logistyka', 'transport', 'budownictwo', 'nieruchomości',
-    'architektura', 'marketing', 'media', 'print', 'drukarnia', 'sklep',
-    'hotel', 'restaurant', 'restauracja', 'clinic', 'klinika', 'szpital',
-  ];
-
-  for (let i = 0; i < lines.length; i++) {
-    if (used.has(i)) continue;
-    const lower = lines[i].toLowerCase();
-    if (CO_KW.some(kw => lower.includes(kw))) {
-      result.company = lines[i].trim();
-      used.add(i);
-      break;
-    }
-  }
-
-  // ALL-CAPS heuristic: company names are often all uppercase
-  if (!result.company) {
-    for (let i = 0; i < lines.length; i++) {
-      if (used.has(i)) continue;
-      const line = lines[i];
-      if (line.length < 2) continue;
-      const letters = line.replace(/[^a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, '');
-      if (letters.length < 2) continue;
-      const upperCount = (line.match(/[A-ZĄĆĘŁŃÓŚŹŻ]/g) || []).length;
-      // More than 75% uppercase letters → likely a company name
-      if (upperCount / letters.length > 0.75 && line.length >= 3) {
-        result.company = line.trim();
-        used.add(i);
-        break;
-      }
-    }
-  }
-
-  // ================================================================
-  // 6. ADDRESS
-  // ================================================================
-  const ADDR_PAT = [
-    /(?:ul\.|al\.|os\.|pl\.|aleja|ulica|osiedle|plac)\s+\S/i,
-    /\d{2}[-–]\d{3}\s+\w+/,       // Polish postal code: 00-000 Warszawa
-    /(?:street|avenue|road|drive|lane|blvd|st\.|ave\.)\b/i,
-    /\bul\b|\bal\b|\bos\b/i,      // abbreviated
-  ];
-  const addrLines = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (used.has(i)) continue;
-    if (ADDR_PAT.some(p => p.test(lines[i]))) {
-      addrLines.push(lines[i]);
-      used.add(i);
-    }
-  }
-  if (addrLines.length) result.address = addrLines.join(', ');
-
-  // ================================================================
-  // 7. NAME — 2-4 words, each starts uppercase, only letters/hyphens
-  // ================================================================
-  const PL_UPPER  = /^[A-ZŁŚŻŹĆĄĘÓŃ]/;
-  const NAME_WORD = /^[A-Za-złśżźćąęóńŁŚŻŹĆĄĘÓŃ](?:[A-Za-złśżźćąęóńŁŚŻŹĆĄĘÓŃ]+)?(?:-[A-Za-złśżźćąęóńŁŚŻŹĆĄĘÓŃ]+)?$/;
-
-  for (let i = 0; i < lines.length; i++) {
-    if (used.has(i)) continue;
-    const words = lines[i].trim().split(/\s+/);
-    if (words.length < 2 || words.length > 5) continue;
-    if (/\d/.test(lines[i])) continue;  // names don't have digits
-    const allValid = words.every(w => NAME_WORD.test(w));
-    const capitalCount = words.filter(w => PL_UPPER.test(w)).length;
-    if (allValid && capitalCount >= 2) {
-      result.name = lines[i].trim();
-      used.add(i);
-      break;
-    }
-  }
-
-  // Fallback name: 2+ words, no digits, most start with uppercase
-  if (!result.name) {
-    for (let i = 0; i < lines.length; i++) {
-      if (used.has(i)) continue;
-      if (/\d/.test(lines[i])) continue;
-      const words = lines[i].trim().split(/\s+/);
-      if (words.length < 2 || words.length > 5) continue;
-      const capWords = words.filter(w => PL_UPPER.test(w) && w.length > 1);
-      if (capWords.length >= 2) {
-        result.name = lines[i].trim();
-        used.add(i);
-        break;
-      }
-    }
-  }
-
-  // ================================================================
-  // 8. FALLBACK COMPANY (if still nothing found)
-  // ================================================================
-  if (!result.company) {
-    for (let i = 0; i < lines.length; i++) {
-      if (used.has(i)) continue;
-      if (lines[i].length > 2 && !/^\d+$/.test(lines[i])) {
-        result.company = lines[i].trim();
-        used.add(i);
-        break;
-      }
-    }
-  }
+  // FALLBACK COMPANY
+  if (!result.company) { for(let i=0;i<lines.length;i++){if(used.has(i))continue;if(lines[i].length>2&&lines[i].length<60){result.company=lines[i];used.add(i);break;}} }
 
   return result;
 }
 
-// ---- FORM ----
-function populateForm(data, rawText) {
-  // Fill fields and mark auto-filled ones with highlight class
-  function fill(el, val) {
-    el.value = val || '';
-    el.classList.toggle('ocr-filled', !!val);
-    // Remove highlight on manual edit
-    el.addEventListener('input', () => el.classList.remove('ocr-filled'), { once: true });
+// â”€â”€ POPULATE FORM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function populateForm(data) {
+  let filled = 0;
+  for (const [k, el] of Object.entries(formFields)) {
+    if (!el) continue;
+    const v = (data && data[k]) || '';
+    el.value = v;
+    el.classList.toggle('ocr-filled', !!v);
+    if (v) filled++;
   }
-
-  fill(fName,    data.name);
-  fill(fCompany, data.company);
-  fill(fTitle,   data.title);
-  fill(fPhone,   data.phone);
-  fill(fEmail,   data.email);
-  fill(fWebsite, data.website);
-  fill(fAddress, data.address);
-  fNotes.value = '';
-  fNotes.classList.remove('ocr-filled');
-
-  rawOcrText.textContent = rawText || '';
-  rawOcrText.classList.add('hidden');
-  btnShowRaw.textContent = '👁 Pokaż surowy tekst OCR';
-  saveStatus.textContent = '';
-
-  // Summary badge: how many fields filled
-  const filled = [data.name, data.company, data.title, data.phone, data.email, data.website, data.address]
-    .filter(Boolean).length;
-  const h2 = dataForm.querySelector('h2');
-  const badge = dataForm.querySelector('.ocr-badge') || document.createElement('span');
-  badge.className = 'ocr-badge';
-  badge.style.cssText = 'margin-left:10px;background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130,246,.3);border-radius:99px;padding:2px 10px;font-size:13px;font-weight:600;vertical-align:middle;';
-  badge.textContent = `${filled}/7 pól`;
-  if (!dataForm.querySelector('.ocr-badge')) h2.appendChild(badge);
-  else badge.textContent = `${filled}/7 pól`;
+  const badge = document.getElementById('ocr-badge');
+  if (badge) badge.textContent = `${filled}/${Object.keys(formFields).length} pĂłl`;
 }
 
-function cancelForm() {
-  dataForm.classList.add('hidden');
-  clearImage();
-}
-
-function toggleRawOcr() {
-  const hidden = rawOcrText.classList.toggle('hidden');
-  btnShowRaw.textContent = hidden ? '👁 Pokaż surowy tekst OCR' : '🙈 Ukryj surowy tekst';
-}
-
-// ---- SAVE CONTACT ----
-async function saveContact() {
-  const contact = {
-    id: Date.now(),
-    date: new Date().toLocaleDateString('pl-PL'),
-    name:    fName.value.trim(),
-    company: fCompany.value.trim(),
-    title:   fTitle.value.trim(),
-    phone:   fPhone.value.trim(),
-    email:   fEmail.value.trim(),
-    website: fWebsite.value.trim(),
-    address: fAddress.value.trim(),
-    notes:   fNotes.value.trim()
-  };
-
-  if (!contact.name && !contact.company && !contact.email && !contact.phone) {
-    setStatus(saveStatus, '⚠️ Wypełnij przynajmniej jedno pole.', 'error');
-    return;
-  }
-
-  // Save to localStorage
-  contacts.unshift(contact);
-  persistContacts();
-  renderTable();
-
-  // Send to Google Sheets
-  const url = localStorage.getItem('sheetsUrl');
-  if (url) {
-    setStatus(saveStatus, '🔄 Wysyłanie do Google Sheets...', 'info');
-    try {
-      await sendToSheets(contact, url);
-      setStatus(saveStatus, '✅ Zapisano lokalnie i w Google Sheets!', 'success');
-    } catch (e) {
-      setStatus(saveStatus, '⚠️ Zapisano lokalnie. Sheets może nie działać – sprawdź URL.', 'error');
-    }
-  } else {
-    setStatus(saveStatus, '✅ Zapisano lokalnie. Skonfiguruj Google Sheets w ustawieniach.', 'success');
-  }
-
-  showToast('✅ Kontakt zapisany!', 'success');
-
-  setTimeout(() => {
-    dataForm.classList.add('hidden');
-    clearImage();
-    document.getElementById('contacts-section').scrollIntoView({ behavior: 'smooth' });
-  }, 1200);
-}
-
-// ---- GOOGLE SHEETS ----
-async function sendToSheets(contact, url) {
-  // Using no-cors mode to avoid CORS issues with Apps Script
-  // Data is sent as URL-encoded form data
-  const params = new URLSearchParams({
-    date:    contact.date    || new Date().toLocaleDateString('pl-PL'),
-    name:    contact.name    || '',
-    company: contact.company || '',
-    title:   contact.title   || '',
-    phone:   contact.phone   || '',
-    email:   contact.email   || '',
-    website: contact.website || '',
-    address: contact.address || '',
-    notes:   contact.notes   || ''
-  });
-
-  await fetch(url, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString()
-  });
-}
-
-// ---- LOCAL STORAGE ----
-function persistContacts() {
-  localStorage.setItem('contacts', JSON.stringify(contacts));
-}
-
+// â”€â”€ CONTACTS STORAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function loadContacts() {
-  const stored = localStorage.getItem('contacts');
-  contacts = stored ? JSON.parse(stored) : [];
-  filteredContacts = [...contacts];
+  try { return JSON.parse(localStorage.getItem('contacts') || '[]'); } catch { return []; }
 }
+function saveContacts() { localStorage.setItem('contacts', JSON.stringify(contacts)); }
 
-// ---- TABLE ----
-function renderTable(list) {
-  const data = list !== undefined ? list : contacts;
-  filteredContacts = data;
-
-  if (data.length === 0) {
-    contactsEmpty.classList.remove('hidden');
-    tableWrapper.classList.add('hidden');
-    return;
+// â”€â”€ SAVE CONTACT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (btnSave) btnSave.addEventListener('click', () => {
+  const existing = editingId ? contacts.find(x => x.id === editingId) : null;
+  const c = {
+    id:      editingId || Date.now().toString(),
+    date:    editingId ? (existing?.date || new Date().toLocaleDateString('pl-PL')) : new Date().toLocaleDateString('pl-PL'),
+    name:    formFields.name?.value.trim()    || '',
+    company: formFields.company?.value.trim() || '',
+    title:   formFields.title?.value.trim()   || '',
+    nip:     formFields.nip?.value.trim()     || '',
+    phone:   formFields.phone?.value.trim()   || '',
+    email:   formFields.email?.value.trim()   || '',
+    website: formFields.website?.value.trim() || '',
+    address: formFields.address?.value.trim() || '',
+    notes:   formFields.notes?.value.trim()   || '',
+    photo:   side1Photo  || existing?.photo  || '',
+    photo2:  side2Photo  || existing?.photo2 || '',
+  };
+  if (editingId) {
+    contacts = contacts.map(x => x.id === editingId ? c : x);
+    editingId = null;
+    if (btnSave) btnSave.textContent = 'Zapisz kontakt';
+  } else {
+    contacts.unshift(c);
   }
+  saveContacts();
+  renderTable();
+  clearForm();
+  showToast('Kontakt zapisany!');
+  sendToSheets(c);
+});
 
-  contactsEmpty.classList.add('hidden');
-  tableWrapper.classList.remove('hidden');
-
-  contactsTbody.innerHTML = data.map(c => `
-    <tr data-id="${c.id}">
-      <td title="${esc(c.name)}">${esc(c.name) || '–'}</td>
-      <td title="${esc(c.company)}">${esc(c.company) || '–'}</td>
-      <td title="${esc(c.title)}">${esc(c.title) || '–'}</td>
-      <td>${c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : '–'}</td>
-      <td>${c.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : '–'}</td>
-      <td>${c.website ? `<a href="${esc(ensureHttp(c.website))}" target="_blank">${esc(c.website)}</a>` : '–'}</td>
-      <td title="${esc(c.address)}">${esc(c.address) || '–'}</td>
-      <td>${esc(c.date) || '–'}</td>
-      <td class="td-actions">
-        <button class="btn btn-ghost btn-sm" onclick="editContact(${c.id})">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteContact(${c.id}, '${esc(c.name || c.company)}')">🗑</button>
-      </td>
-    </tr>
-  `).join('');
+function clearForm() {
+  for (const el of Object.values(formFields)) { if (el) { el.value=''; el.classList.remove('ocr-filled'); } }
+  side1Data=null; side2Data=null; side1Photo=null; side2Photo=null;
+  if (photo1Wrap) photo1Wrap.classList.add('hidden');
+  if (photo2Wrap) photo2Wrap.classList.add('hidden');
+  if (rawTextEl) rawTextEl.value='';
+  if (ocrStatus) ocrStatus.style.display='none';
+  if (scanPreview) { scanPreview.src=''; scanPreview.style.display='none'; }
+  if (side2Prompt) side2Prompt.style.display='none';
+  if (tabSide1) tabSide1.classList.remove('done');
+  if (tabSide2) tabSide2.classList.remove('done');
+  currentSide=1; switchSideTab(1);
+  if (dataForm) dataForm.style.display='none';
+  currentFile=null;
 }
 
-function esc(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+if (btnClear) btnClear.addEventListener('click', () => { clearForm(); editingId=null; if(btnSave)btnSave.textContent='Zapisz kontakt'; });
+
+// â”€â”€ RENDER TABLE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function renderTable(filter = '') {
+  const q = (filter||'').toLowerCase();
+  const filtered = contacts.filter(c => [c.name,c.company,c.title,c.phone,c.email,c.nip].join(' ').toLowerCase().includes(q));
+  if (contactCount) contactCount.textContent = `(${filtered.length})`;
+  if (!contactsBody) return;
+  contactsBody.innerHTML = '';
+  filtered.forEach(c => {
+    const tr = document.createElement('tr');
+    const thumb = c.photo
+      ? `<img src="${esc(c.photo)}" class="contact-thumb" onclick="openLightbox(this.src,'${esc(c.name||'Strona 1')}')" />`
+      : `<span class="no-photo">đźŞŞ</span>`;
+    tr.innerHTML = `
+      <td>${thumb}</td>
+      <td>${esc(c.name)}</td>
+      <td>${esc(c.company)}</td>
+      <td>${esc(c.title)}</td>
+      <td>${esc(c.nip)}</td>
+      <td>${esc(c.phone)}</td>
+      <td>${esc(c.email)}</td>
+      <td>${c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(c.website.replace(/^https?:\/\//,''))}</a>` : ''}</td>
+      <td>${esc(c.address)}</td>
+      <td>${esc(c.date)}</td>
+      <td>
+        <button class="btn btn-sm" onclick="editContact('${c.id}')">âśŹď¸Ź</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteContact('${c.id}')">đź—‘ď¸Ź</button>
+      </td>`;
+    contactsBody.appendChild(tr);
+  });
 }
 
-function ensureHttp(url) {
-  if (!url) return '';
-  return url.startsWith('http') ? url : 'https://' + url;
-}
+function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
 
-// ---- SEARCH ----
-function handleSearch() {
-  const q = searchInput.value.toLowerCase();
-  if (!q) {
-    renderTable(contacts);
-    return;
-  }
-  const result = contacts.filter(c =>
-    [c.name, c.company, c.title, c.phone, c.email, c.website, c.address]
-      .some(v => v && v.toLowerCase().includes(q))
-  );
-  renderTable(result);
-}
-
-// ---- EDIT ----
+// â”€â”€ EDIT / DELETE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 window.editContact = function(id) {
-  const c = contacts.find(x => x.id === id);
-  if (!c) return;
-  fName.value    = c.name    || '';
-  fCompany.value = c.company || '';
-  fTitle.value   = c.title   || '';
-  fPhone.value   = c.phone   || '';
-  fEmail.value   = c.email   || '';
-  fWebsite.value = c.website || '';
-  fAddress.value = c.address || '';
-  fNotes.value   = c.notes   || '';
-  rawOcrText.textContent = '';
-  rawOcrText.classList.add('hidden');
-  saveStatus.textContent = '';
-
-  dataForm.classList.remove('hidden');
-
-  // Override save to update instead of insert
-  const btnSave = document.getElementById('btn-save-contact');
-  btnSave.textContent = '💾 Zapisz zmiany';
-  btnSave.onclick = async () => {
-    c.name    = fName.value.trim();
-    c.company = fCompany.value.trim();
-    c.title   = fTitle.value.trim();
-    c.phone   = fPhone.value.trim();
-    c.email   = fEmail.value.trim();
-    c.website = fWebsite.value.trim();
-    c.address = fAddress.value.trim();
-    c.notes   = fNotes.value.trim();
-    persistContacts();
-    renderTable();
-    dataForm.classList.add('hidden');
-    btnSave.textContent = '💾 Zapisz kontakt';
-    btnSave.onclick = saveContact;
-    showToast('✅ Kontakt zaktualizowany!', 'success');
-  };
-
-  dataForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const c = contacts.find(x => x.id === id); if (!c) return;
+  editingId = id;
+  for (const [k, el] of Object.entries(formFields)) { if (el) el.value = c[k] || ''; }
+  if (c.photo  && photo1Preview) { photo1Preview.src=c.photo;  if(photo1Wrap)photo1Wrap.classList.remove('hidden'); }
+  if (c.photo2 && photo2Preview) { photo2Preview.src=c.photo2; if(photo2Wrap)photo2Wrap.classList.remove('hidden'); }
+  if (dataForm) dataForm.style.display='block';
+  if (btnSave)  btnSave.textContent='Aktualizuj kontakt';
+  dataForm.scrollIntoView({behavior:'smooth'});
 };
 
-// ---- DELETE ----
-window.deleteContact = function(id, name) {
-  pendingDeleteId = id;
-  modalMessage.textContent = `Czy na pewno chcesz usunąć kontakt "${name}"?`;
-  modalOverlay.classList.remove('hidden');
+window.deleteContact = function(id) {
+  if (!confirm('UsunÄ…Ä‡ ten kontakt?')) return;
+  contacts = contacts.filter(x => x.id !== id);
+  saveContacts();
+  renderTable(searchInput?.value || '');
+  showToast('Kontakt usuniÄ™ty.','danger');
 };
 
-function executeDelete() {
-  if (pendingDeleteId !== null) {
-    contacts = contacts.filter(c => c.id !== pendingDeleteId);
-    persistContacts();
-    renderTable();
-    showToast('🗑 Kontakt usunięty.', '');
-    pendingDeleteId = null;
-  }
-  closeModal();
-}
+// â”€â”€ SEARCH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (searchInput) searchInput.addEventListener('input', () => renderTable(searchInput.value));
 
-function closeModal() {
-  modalOverlay.classList.add('hidden');
-}
-
-function confirmClearAll() {
-  if (contacts.length === 0) return;
-  pendingDeleteId = 'ALL';
-  modalMessage.textContent = `Czy na pewno chcesz usunąć WSZYSTKIE ${contacts.length} kontakty?`;
-  modalOverlay.classList.remove('hidden');
-  modalConfirm.onclick = () => {
-    contacts = [];
-    persistContacts();
-    renderTable();
-    closeModal();
-    showToast('🗑 Wszystkie kontakty usunięte.', '');
-    modalConfirm.onclick = executeDelete;
-  };
-}
-
-// ---- EXPORT CSV ----
-function exportCSV() {
-  const list = filteredContacts.length > 0 ? filteredContacts : contacts;
-  if (list.length === 0) {
-    showToast('⚠️ Brak danych do eksportu.', 'error');
-    return;
-  }
-
-  const headers = ['Data dodania','Imię i Nazwisko','Firma','Stanowisko','Telefon','E-mail','Strona WWW','Adres','Notatki'];
-  const rows = list.map(c => [
-    c.date, c.name, c.company, c.title, c.phone, c.email, c.website, c.address, c.notes
-  ].map(v => `"${(v || '').replace(/"/g, '""')}"`).join(','));
-
-  const csv = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
+// â”€â”€ EXPORT CSV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+if (btnExport) btnExport.addEventListener('click', () => {
+  const hd = ['ImiÄ™ i Nazwisko','Firma','Stanowisko','NIP','Telefon','E-mail','WWW','Adres','Notatki','Data'];
+  const rows = contacts.map(c => [c.name,c.company,c.title,c.nip,c.phone,c.email,c.website,c.address,c.notes,c.date].map(v=>`"${(v||'').replace(/"/g,'""')}"`).join(','));
+  const csv  = [hd.join(','), ...rows].join('\n');
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));
   a.download = `wizytowki_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
-  URL.revokeObjectURL(url);
-  showToast('⬇️ Plik CSV pobrany!', 'success');
+});
+
+// â”€â”€ LIGHTBOX â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+window.openLightbox = function(src, label) {
+  if (!lightbox) return;
+  lightboxImg.src = src;
+  if (lightboxLabel) lightboxLabel.textContent = label || '';
+  lightbox.classList.remove('hidden');
+};
+window.closeLightbox = function() {
+  if (!lightbox) return;
+  lightbox.classList.add('hidden');
+  lightboxImg.src = '';
+};
+if (lightbox)      lightbox.addEventListener('click', e => { if (e.target===lightbox) closeLightbox(); });
+if (photo1Preview) photo1Preview.addEventListener('click', () => openLightbox(photo1Preview.src,'Strona 1'));
+if (photo2Preview) photo2Preview.addEventListener('click', () => openLightbox(photo2Preview.src,'Strona 2'));
+
+// â”€â”€ GOOGLE SHEETS SYNC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function getSheetsCreds() { return { url: localStorage.getItem('sheetsUrl')||'', key: localStorage.getItem('syncKey')||'' }; }
+
+function sendToSheets(c) {
+  const { url, key } = getSheetsCreds(); if (!url) return;
+  const p = new URLSearchParams({key,id:c.id,date:c.date,name:c.name,company:c.company,title:c.title,nip:c.nip,phone:c.phone,email:c.email,website:c.website,address:c.address,notes:c.notes});
+  fetch(url, {method:'POST', body:p, mode:'no-cors'}).catch(e => console.warn('Sheets POST:',e));
 }
 
-// ---- TOAST ----
-let toastTimer;
-function showToast(msg, type) {
-  toast.textContent = msg;
-  toast.className = `toast ${type}`;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.add('hidden'), 3000);
+async function syncFromSheets() {
+  const { url, key } = getSheetsCreds(); if (!url || !key) return;
+  try {
+    const res  = await fetch(`${url}?action=list&key=${encodeURIComponent(key)}`);
+    if (!res.ok) return;
+    const json = await res.json();
+    if (!Array.isArray(json) || json.length === 0) return;
+    const localById = Object.fromEntries(contacts.map(c=>[c.id,c]));
+    const merged    = json.map(r => ({...r, photo: localById[r.id]?.photo||'', photo2: localById[r.id]?.photo2||''}));
+    const remoteIds = new Set(json.map(c=>c.id));
+    contacts = [...merged, ...contacts.filter(c=>!remoteIds.has(c.id))];
+    saveContacts();
+    renderTable();
+    showToast(`Zsynchronizowano ${merged.length} kontaktĂłw.`);
+  } catch (e) { console.warn('Sync error:',e); }
 }
 
-// ---- HELPERS ----
-function setStatus(el, msg, type) {
-  el.textContent = msg;
-  el.className = `status-${type}`;
-}
+if (btnSync) btnSync.addEventListener('click', async () => {
+  btnSync.disabled = true;
+  await syncFromSheets();
+  btnSync.disabled = false;
+});
