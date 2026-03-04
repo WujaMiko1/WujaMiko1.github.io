@@ -757,31 +757,95 @@ function getSheetsCreds() {
   return { url: localStorage.getItem('sheetsUrl')||'', key: localStorage.getItem('syncKey')||'' };
 }
 
-function sendToSheets(c) {
-  const { url, key } = getSheetsCreds(); if (!url) return;
-  const p = new URLSearchParams({key,id:c.id,date:c.date,name:c.name,company:c.company,title:c.title,nip:c.nip,phone:c.phone,email:c.email,website:c.website,address:c.address,notes:c.notes});
-  fetch(url, {method:'POST', body:p, mode:'no-cors'}).catch(e => console.warn('Sheets POST:',e));
+async function sendToSheets(c) {
+  const { url, key } = getSheetsCreds();
+  if (!url) return;
+  try {
+    const p = new URLSearchParams({key,id:c.id,date:c.date,name:c.name,company:c.company,title:c.title,nip:c.nip,phone:c.phone,email:c.email,website:c.website,address:c.address,notes:c.notes});
+    // Try with CORS first, fallback to no-cors
+    try {
+      const res = await fetch(url, {method:'POST', body:p});
+      const json = await res.json();
+      if (json.status === 'error') console.warn('Sheets POST error:', json.message);
+    } catch (e2) {
+      // Fallback no-cors (cannot read response but request still goes through)
+      await fetch(url, {method:'POST', body:p, mode:'no-cors'});
+    }
+  } catch (e) {
+    console.warn('Sheets POST failed:', e);
+  }
 }
 
 async function syncFromSheets() {
-  const { url, key } = getSheetsCreds(); if (!url || !key) return;
+  const { url, key } = getSheetsCreds();
+  if (!url || !key) {
+    showToast('Brak ustawień synchronizacji! Wpisz URL i klucz w ⚙️ Ustawieniach.', 'danger');
+    return false;
+  }
   try {
-    const res  = await fetch(`${url}?action=list&key=${encodeURIComponent(key)}`);
-    if (!res.ok) return;
+    showToast('Trwa synchronizacja...');
+    const res = await fetch(`${url}?action=list&key=${encodeURIComponent(key)}`);
+    if (!res.ok) {
+      showToast('Błąd serwera: ' + res.status + ' ' + res.statusText, 'danger');
+      return false;
+    }
     const json = await res.json();
-    if (!Array.isArray(json) || json.length === 0) return;
+    if (json && json.status === 'error') {
+      showToast('Błąd synchronizacji: ' + (json.message || 'Nieznany'), 'danger');
+      return false;
+    }
+    if (!Array.isArray(json)) {
+      showToast('Nieprawidłowa odpowiedź serwera (nie jest listą).', 'danger');
+      return false;
+    }
+    if (json.length === 0) {
+      showToast('Chmura jest pusta. Najpierw zapisz kontakty na drugim urządzeniu.');
+      return true;
+    }
     const localById = Object.fromEntries(contacts.map(c => [c.id, c]));
     const merged    = json.map(r => ({...r, photo:(localById[r.id]?.photo||''), photo2:(localById[r.id]?.photo2||'')}));
     const remoteIds = new Set(json.map(c => c.id));
     contacts = [...merged, ...contacts.filter(c => !remoteIds.has(c.id))];
     saveContacts();
     renderTable();
-    showToast('Zsynchronizowano ' + merged.length + ' kontaktow.');
-  } catch(e) { console.warn('Sync error:',e); }
+    showToast('✅ Zsynchronizowano ' + json.length + ' kontaktów z chmury.');
+    return true;
+  } catch(e) {
+    console.error('Sync error:', e);
+    showToast('Błąd połączenia: ' + (e.message || String(e)), 'danger');
+    return false;
+  }
 }
 
 if (btnSync) btnSync.addEventListener('click', async () => {
   btnSync.disabled = true;
+  btnSync.textContent = '⏳';
   await syncFromSheets();
   btnSync.disabled = false;
+  btnSync.textContent = '🔄';
+});
+
+// Test connection button
+const btnTestConn = document.getElementById('btn-test-connection');
+const connStatus  = document.getElementById('connection-status');
+if (btnTestConn) btnTestConn.addEventListener('click', async () => {
+  const { url, key } = getSheetsCreds();
+  if (!url || !key) {
+    if (connStatus) { connStatus.textContent = '❌ Wpisz URL i klucz synchronizacji powyżej i kliknij Zapisz.'; connStatus.style.color = 'var(--danger)'; }
+    return;
+  }
+  if (connStatus) { connStatus.textContent = '⏳ Testuję połączenie...'; connStatus.style.color = ''; }
+  try {
+    const res  = await fetch(`${url}?action=list&key=${encodeURIComponent(key)}`);
+    const json = await res.json();
+    if (json && json.status === 'error') {
+      if (connStatus) { connStatus.textContent = '❌ Błąd: ' + (json.message || 'Nieznany'); connStatus.style.color = 'var(--danger)'; }
+    } else if (Array.isArray(json)) {
+      if (connStatus) { connStatus.textContent = '✅ Połączono! Kontaktów w chmurze: ' + json.length; connStatus.style.color = 'var(--success)'; }
+    } else {
+      if (connStatus) { connStatus.textContent = '⚠️ Nieoczekiwana odpowiedź serwera.'; connStatus.style.color = 'var(--warning,orange)'; }
+    }
+  } catch (e) {
+    if (connStatus) { connStatus.textContent = '❌ Błąd połączenia: ' + (e.message || String(e)); connStatus.style.color = 'var(--danger)'; }
+  }
 });
