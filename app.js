@@ -152,6 +152,41 @@ function clearImage() {
   fileInput.value = '';
 }
 
+// ---- IMAGE PRE-PROCESSING (poprawia jakość OCR) ----
+function preprocessImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      // Scale up small images for better OCR
+      const scale = Math.max(1, Math.min(3, 2000 / Math.max(img.width, img.height)));
+      canvas.width  = img.width  * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d');
+
+      // Draw scaled image
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      // Grayscale + contrast boost
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imageData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        // Grayscale
+        const gray = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+        // Contrast stretch: push darks darker, lights lighter
+        const contrast = 1.4;
+        const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
+        const adjusted = Math.min(255, Math.max(0, factor * (gray - 128) + 128));
+        d[i] = d[i+1] = d[i+2] = adjusted;
+      }
+      ctx.putImageData(imageData, 0, 0);
+
+      canvas.toBlob(blob => resolve(blob), 'image/png');
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 // ---- OCR ----
 async function runOCR() {
   if (!currentImageFile) return;
@@ -159,23 +194,33 @@ async function runOCR() {
   btnScan.disabled = true;
   ocrStatus.classList.remove('hidden');
   dataForm.classList.add('hidden');
-  setProgress(0, 'Ładowanie silnika OCR...');
+  setProgress(0, 'Przetwarzanie obrazu...');
 
   try {
+    // Pre-process image for better OCR
+    setProgress(10, 'Poprawa kontrastu obrazu...');
+    const processedBlob = await preprocessImage(currentImageFile);
+
+    setProgress(20, 'Ładowanie silnika OCR...');
     const worker = await Tesseract.createWorker(['pol', 'eng'], 1, {
       logger: (m) => {
         if (m.status === 'recognizing text') {
-          setProgress(Math.round(m.progress * 100), `Rozpoznawanie tekstu... ${Math.round(m.progress * 100)}%`);
+          setProgress(50 + Math.round(m.progress * 45), `Rozpoznawanie tekstu... ${50 + Math.round(m.progress * 45)}%`);
         } else if (m.status === 'loading language traineddata') {
-          setProgress(15, 'Ładowanie danych językowych...');
+          setProgress(25, 'Ładowanie danych językowych...');
         } else if (m.status === 'initializing api') {
-          setProgress(30, 'Inicjalizacja OCR...');
+          setProgress(40, 'Inicjalizacja OCR...');
         }
       }
     });
 
-    setProgress(40, 'Analiza obrazu...');
-    const { data: { text } } = await worker.recognize(currentImageFile);
+    // Configure for business cards
+    await worker.setParameters({
+      tessedit_pageseg_mode: '6', // Assume uniform block of text
+    });
+
+    setProgress(50, 'Analiza obrazu...');
+    const { data: { text } } = await worker.recognize(processedBlob);
     await worker.terminate();
 
     setProgress(100, 'Gotowe!');
@@ -201,150 +246,269 @@ function setProgress(pct, text) {
 }
 
 // ---- PARSER ----
-const JOB_TITLE_KEYWORDS = [
-  'director', 'manager', 'dyrektor', 'kierownik', 'prezes', 'ceo', 'cto', 'cfo', 'coo',
-  'president', 'vice president', 'vp ', 'wiceprezes', 'specjalista', 'specialist',
-  'consultant', 'konsultant', 'analityk', 'analyst', 'engineer', 'inżynier',
-  'developer', 'programista', 'designer', 'projektant', 'koordynator', 'coordinator',
-  'asystent', 'assistant', 'sprzedaż', 'sales', 'marketing', 'partner', 'właściciel',
-  'owner', 'founder', 'założyciel', 'head of', 'szef', 'supervisor', 'agent',
-  'представитель', 'advisor', 'doradca', 'broker', 'accountant', 'księgowy',
-  'prawnik', 'lawyer', 'attorney', 'lekarz', 'doctor', 'dr ', 'prof ', 'mgr '
-];
 
-const COMPANY_KEYWORDS = [
-  'sp. z o.o', 'sp.z o.o', 'spółka', 'spzoo', 's.a.', ' sa ', ' ltd', 'limited',
-  'gmbh', 'inc.', 'inc ', 'corp.', 'corp ', 'llc', ' s.c.', 's.j.', 's.k.',
-  'group', 'holding', 'studio', 'agency', 'agencja', 'instytut', 'institute',
-  'university', 'uczelnia', 'bank', 'fundacja', 'foundation', 'solutions',
-  'technologies', 'tech ', 'systems', 'services', 'consulting', 'ventures'
-];
+// Pre-process raw OCR text to fix common mistakes
+function fixOcrText(raw) {
+  return raw
+    // Fix @-sign alternatives (OCR often misreads @)
+    .replace(/\[at\]/gi, '@')
+    .replace(/\(at\)/gi, '@')
+    .replace(/\[At\]/gi, '@')
+    .replace(/ at ([a-z])/gi, '@$1')
+    // Fix broken phone separators
+    .replace(/(\d)\s*[—–−]\s*(\d)/g, '$1-$2')
+    // Fix extra spaces in emails
+    .replace(/([a-z0-9._%+\-]+)\s*@\s*([a-z0-9.\-]+\.[a-z]{2,})/gi, '$1@$2')
+    // Common OCR digit/letter swaps in words (only outside emails/phones)
+    .replace(/(?<![a-z0-9@])0(?=[a-z])/gi, 'O')  // 0raz → Oraz (very conservative)
+    .trim();
+}
 
 function parseBusinessCard(rawText) {
-  const lines = rawText
+  const fixed = fixOcrText(rawText);
+
+  // Lines: cleaned, non-empty (min 2 chars)
+  const lines = fixed
     .split('\n')
     .map(l => l.trim())
     .filter(l => l.length > 1);
 
-  const result = {
-    name: '',
-    company: '',
-    title: '',
-    phone: '',
-    email: '',
-    website: '',
-    address: ''
-  };
+  const result = { name: '', company: '', title: '', phone: '', email: '', website: '', address: '' };
+  const used = new Set();
 
-  const usedLines = new Set();
-
-  // 1. EMAIL - most reliable
-  const emailRegex = /[\w.+\-]+@[\w\-]+\.[\w.\-]{2,}/gi;
-  for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(emailRegex);
-    if (match && !result.email) {
-      result.email = match[0].toLowerCase();
-      usedLines.add(i);
-      break;
-    }
-  }
-
-  // 2. PHONE - various Polish and international formats
-  const phoneRegex = /(?:\+?[\d\s\-().]{7,18})/g;
-  for (let i = 0; i < lines.length; i++) {
-    if (usedLines.has(i)) continue;
-    const cleaned = lines[i].replace(/[^\d\s+\-().]/g, '');
-    const match = cleaned.match(phoneRegex);
-    if (match) {
-      const candidate = match[0].trim();
-      // Must have at least 7 digits
-      const digits = candidate.replace(/\D/g, '');
-      if (digits.length >= 7 && digits.length <= 15) {
-        result.phone = candidate.replace(/\s+/g, ' ').trim();
-        usedLines.add(i);
-        break;
-      }
-    }
-  }
-
-  // 3. WEBSITE
-  const webRegex = /(?:https?:\/\/|www\.)[^\s,;]+/gi;
-  for (let i = 0; i < lines.length; i++) {
-    if (usedLines.has(i)) continue;
-    const match = lines[i].match(webRegex);
-    if (match && !result.website) {
-      result.website = match[0].replace(/\/$/, '');
-      usedLines.add(i);
-      break;
-    }
-  }
-
-  // 4. JOB TITLE
-  for (let i = 0; i < lines.length; i++) {
-    if (usedLines.has(i)) continue;
-    const lower = lines[i].toLowerCase();
-    if (JOB_TITLE_KEYWORDS.some(kw => lower.includes(kw))) {
-      result.title = lines[i];
-      usedLines.add(i);
-      break;
-    }
-  }
-
-  // 5. COMPANY
-  for (let i = 0; i < lines.length; i++) {
-    if (usedLines.has(i)) continue;
-    const lower = lines[i].toLowerCase();
-    if (COMPANY_KEYWORDS.some(kw => lower.includes(kw))) {
-      result.company = lines[i];
-      usedLines.add(i);
-      break;
-    }
-  }
-
-  // 6. ADDRESS - lines with street keywords or postal code
-  const addrRegex = /(?:ul\.|al\.|os\.|pl\.|str\.|avenue|street|road|\d{2}-\d{3})/i;
-  const addrParts = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (usedLines.has(i)) continue;
-    if (addrRegex.test(lines[i])) {
-      addrParts.push(lines[i]);
-      usedLines.add(i);
-    }
-  }
-  if (addrParts.length > 0) result.address = addrParts.join(', ');
-
-  // 7. NAME - look for 2 capitalized words in unused lines
-  const nameRegex = /^[A-ZŁŚŻŹĆĄĘÓŃ][a-złśżźćąęóń]+(?:[-\s][A-ZŁŚŻŹĆĄĘÓŃ][a-złśżźćąęóń]+)+$/;
-  for (let i = 0; i < lines.length; i++) {
-    if (usedLines.has(i)) continue;
-    const cleaned = lines[i].replace(/[^a-zA-ZłśżźćąęóńŁŚŻŹĆĄĘÓŃ\s\-]/g, '').trim();
-    if (nameRegex.test(cleaned) && cleaned.split(/\s+/).length >= 2 && cleaned.split(/\s+/).length <= 4) {
-      result.name = cleaned;
-      usedLines.add(i);
-      break;
-    }
-  }
-
-  // Fallback name: first non-used line that looks like a name (all letters, no digits)
-  if (!result.name) {
+  // ================================================================
+  // 1. EMAIL — search full joined text (catches split-line emails)
+  // ================================================================
+  const joinedText = lines.join(' ');
+  const emailMatch = joinedText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  if (emailMatch) {
+    result.email = emailMatch[0].toLowerCase();
+    // Mark the line(s) containing @ as used
     for (let i = 0; i < lines.length; i++) {
-      if (usedLines.has(i)) continue;
-      const onlyLetters = lines[i].replace(/[^a-zA-ZłśżźćąęóńŁŚŻŹĆĄĘÓŃ\s.]/g, '').trim();
-      if (onlyLetters.length > 3 && onlyLetters.split(/\s+/).length >= 2) {
-        result.name = lines[i].trim();
-        usedLines.add(i);
+      if (lines[i].includes('@')) { used.add(i); break; }
+    }
+  }
+
+  // ================================================================
+  // 2. PHONE — multiple Polish/international patterns
+  // ================================================================
+  const PHONE_PATTERNS = [
+    // +48 mobile/landline
+    /(?:\+48|0048)[\s.\-]?(?:\d[\s.\-]?){9}/,
+    // 9-digit Polish mobile: 123 456 789 or 123-456-789
+    /(?<!\d)\d{3}[\s.\-]\d{3}[\s.\-]\d{3}(?!\d)/,
+    // Polish landline: 12 345 67 89
+    /(?<!\d)\d{2}[\s.\-]\d{3}[\s.\-]\d{2}[\s.\-]\d{2}(?!\d)/,
+    // 9 digits no separator
+    /(?<!\d)\d{9}(?!\d)/,
+    // International: +XX XXX XXX XXX
+    /\+\d{1,3}[\s.\-]?\d{2,4}[\s.\-]?\d{2,4}[\s.\-]?\d{2,4}/,
+    // Generic: mostly digits, some separators
+    /(?<!\d)[\d]{2,4}[\s.\-][\d]{2,4}[\s.\-][\d]{2,4}(?!\d)/,
+  ];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    const line = lines[i];
+    for (const pat of PHONE_PATTERNS) {
+      const m = line.match(pat);
+      if (m) {
+        const digits = m[0].replace(/\D/g, '');
+        if (digits.length >= 7 && digits.length <= 15) {
+          result.phone = m[0].trim();
+          used.add(i);
+          break;
+        }
+      }
+    }
+    if (result.phone) break;
+  }
+
+  // Fallback: line is 7-15 digits (+separators), nothing else significant
+  if (!result.phone) {
+    for (let i = 0; i < lines.length; i++) {
+      if (used.has(i)) continue;
+      const stripped = lines[i].replace(/[\s\-+().]/g, '');
+      if (/^\d{7,15}$/.test(stripped)) {
+        result.phone = lines[i].trim();
+        used.add(i);
         break;
       }
     }
   }
 
-  // Fallback company: first unused line with >3 chars (if no company yet)
+  // ================================================================
+  // 3. WEBSITE — various formats
+  // ================================================================
+  const WEB_PATTERNS = [
+    /https?:\/\/[\w\-]+(?:\.[\w\-]+)+(?:\/[^\s,;]*)*/i,
+    /www\.[\w\-]+(?:\.[\w\-]+)+(?:\/[^\s,;]*)*/i,
+    /[\w\-]{2,}\.(?:pl|com|net|org|eu|io|biz|info|co\.uk|com\.pl)(?:\/[^\s,;]*)*/i,
+  ];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    for (const pat of WEB_PATTERNS) {
+      const m = lines[i].match(pat);
+      if (m) {
+        const candidate = m[0].replace(/[.,;]+$/, '');
+        // Not an email, must contain a dot
+        if (!candidate.includes('@') && candidate.includes('.') && candidate.length > 4) {
+          result.website = candidate;
+          used.add(i);
+          break;
+        }
+      }
+    }
+    if (result.website) break;
+  }
+
+  // ================================================================
+  // 4. JOB TITLE — keyword-based
+  // ================================================================
+  const JOB_KW = [
+    // Polish
+    'dyrektor', 'kierownik', 'prezes', 'wiceprezes', 'właściciel', 'współwłaściciel',
+    'specjalista', 'starszy specjalista', 'główny specjalista',
+    'koordynator', 'asystent', 'asystentka', 'sekretarz', 'sekretarka',
+    'konsultant', 'doradca', 'analityk', 'administrator',
+    'programista', 'inżynier', 'projektant', 'grafik',
+    'handlowiec', 'przedstawiciel handlowy', 'przedstawiciel', 'agent', 'broker', 'pośrednik',
+    'księgowy', 'księgowa', 'prawnik', 'adwokat', 'radca', 'notariusz',
+    'lekarz', 'pielęgniarka', 'farmaceuta', 'nauczyciel', 'wykładowca',
+    'szef', 'naczelnik', 'kierowca', 'operator', 'technik', 'montażysta',
+    'architekt', 'geodeta', 'rzeczoznawca', 'biegły',
+    'dr ', 'dr.', 'prof.', 'prof ', 'mgr ', 'mgr.', 'inż.', 'lic.',
+    // English
+    'ceo', 'cto', 'cfo', 'coo', 'cmo', 'vp ', 'vice president',
+    'director', 'manager', 'president', 'founder', 'partner', 'officer',
+    'executive', 'supervisor', 'engineer', 'developer', 'designer',
+    'analyst', 'consultant', 'specialist', 'coordinator', 'assistant',
+    'sales', 'accountant', 'attorney', 'lawyer', 'head of', 'lead ',
+    'senior ', 'junior ', 'intern',
+  ];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    const lower = lines[i].toLowerCase();
+    if (JOB_KW.some(kw => lower.includes(kw))) {
+      result.title = lines[i].trim();
+      used.add(i);
+      break;
+    }
+  }
+
+  // ================================================================
+  // 5. COMPANY — legal suffixes + ALL-CAPS heuristic
+  // ================================================================
+  const CO_KW = [
+    // Polish legal forms
+    'sp. z o.o', 'sp.z o.o', 'sp. z o.o.', 'spółka z o.o', 'spółka akcyjna',
+    's.a.', ' s.a,', 's.c.', 's.j.', 's.k.', 's.k.a.', ' sp.k', 'spzoo',
+    // International
+    ' ltd', ' limited', ' gmbh', ' ag,', ' ag ', ' inc.', ' inc,', ' corp.', ' corp,',
+    ' llc', ' llp', ' bv ', ' nv ',
+    // Generic business words
+    'group', 'holding', 'studio', 'agencja', 'agency', 'instytut', 'institute',
+    'fundacja', 'foundation', 'solutions', 'technologies', 'technology',
+    'systems', 'services', 'consulting', 'ventures', 'investments', 'capital',
+    'logistics', 'logistyka', 'transport', 'budownictwo', 'nieruchomości',
+    'architektura', 'marketing', 'media', 'print', 'drukarnia', 'sklep',
+    'hotel', 'restaurant', 'restauracja', 'clinic', 'klinika', 'szpital',
+  ];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    const lower = lines[i].toLowerCase();
+    if (CO_KW.some(kw => lower.includes(kw))) {
+      result.company = lines[i].trim();
+      used.add(i);
+      break;
+    }
+  }
+
+  // ALL-CAPS heuristic: company names are often all uppercase
   if (!result.company) {
     for (let i = 0; i < lines.length; i++) {
-      if (usedLines.has(i)) continue;
-      if (lines[i].length > 3) {
-        result.company = lines[i];
-        usedLines.add(i);
+      if (used.has(i)) continue;
+      const line = lines[i];
+      if (line.length < 2) continue;
+      const letters = line.replace(/[^a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, '');
+      if (letters.length < 2) continue;
+      const upperCount = (line.match(/[A-ZĄĆĘŁŃÓŚŹŻ]/g) || []).length;
+      // More than 75% uppercase letters → likely a company name
+      if (upperCount / letters.length > 0.75 && line.length >= 3) {
+        result.company = line.trim();
+        used.add(i);
+        break;
+      }
+    }
+  }
+
+  // ================================================================
+  // 6. ADDRESS
+  // ================================================================
+  const ADDR_PAT = [
+    /(?:ul\.|al\.|os\.|pl\.|aleja|ulica|osiedle|plac)\s+\S/i,
+    /\d{2}[-–]\d{3}\s+\w+/,       // Polish postal code: 00-000 Warszawa
+    /(?:street|avenue|road|drive|lane|blvd|st\.|ave\.)\b/i,
+    /\bul\b|\bal\b|\bos\b/i,      // abbreviated
+  ];
+  const addrLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    if (ADDR_PAT.some(p => p.test(lines[i]))) {
+      addrLines.push(lines[i]);
+      used.add(i);
+    }
+  }
+  if (addrLines.length) result.address = addrLines.join(', ');
+
+  // ================================================================
+  // 7. NAME — 2-4 words, each starts uppercase, only letters/hyphens
+  // ================================================================
+  const PL_UPPER  = /^[A-ZŁŚŻŹĆĄĘÓŃ]/;
+  const NAME_WORD = /^[A-Za-złśżźćąęóńŁŚŻŹĆĄĘÓŃ](?:[A-Za-złśżźćąęóńŁŚŻŹĆĄĘÓŃ]+)?(?:-[A-Za-złśżźćąęóńŁŚŻŹĆĄĘÓŃ]+)?$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    const words = lines[i].trim().split(/\s+/);
+    if (words.length < 2 || words.length > 5) continue;
+    if (/\d/.test(lines[i])) continue;  // names don't have digits
+    const allValid = words.every(w => NAME_WORD.test(w));
+    const capitalCount = words.filter(w => PL_UPPER.test(w)).length;
+    if (allValid && capitalCount >= 2) {
+      result.name = lines[i].trim();
+      used.add(i);
+      break;
+    }
+  }
+
+  // Fallback name: 2+ words, no digits, most start with uppercase
+  if (!result.name) {
+    for (let i = 0; i < lines.length; i++) {
+      if (used.has(i)) continue;
+      if (/\d/.test(lines[i])) continue;
+      const words = lines[i].trim().split(/\s+/);
+      if (words.length < 2 || words.length > 5) continue;
+      const capWords = words.filter(w => PL_UPPER.test(w) && w.length > 1);
+      if (capWords.length >= 2) {
+        result.name = lines[i].trim();
+        used.add(i);
+        break;
+      }
+    }
+  }
+
+  // ================================================================
+  // 8. FALLBACK COMPANY (if still nothing found)
+  // ================================================================
+  if (!result.company) {
+    for (let i = 0; i < lines.length; i++) {
+      if (used.has(i)) continue;
+      if (lines[i].length > 2 && !/^\d+$/.test(lines[i])) {
+        result.company = lines[i].trim();
+        used.add(i);
         break;
       }
     }
