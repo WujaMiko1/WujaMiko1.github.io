@@ -2,7 +2,7 @@
    SERVICE WORKER - Offline support
    ========================================= */
 
-const CACHE_NAME = 'wizytowki-v1';
+const CACHE_NAME = 'wizytowki-v4';
 const ASSETS = [
   './',
   './index.html',
