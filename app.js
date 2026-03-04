@@ -258,9 +258,10 @@ function preprocessImage(file) {
           sh=Math.min(img.height,Math.round((maxY-minY+PAD*2)*f));
         }
 
-        const UPSCALE=4;
+        const MAX_DIM = 2400;
+        const UPSCALE = Math.min(2, MAX_DIM / Math.max(sw, sh, 1));
         const cOcr=document.createElement('canvas');
-        cOcr.width=sw*UPSCALE; cOcr.height=sh*UPSCALE;
+        cOcr.width=Math.round(sw*UPSCALE); cOcr.height=Math.round(sh*UPSCALE);
         const ctxO=cOcr.getContext('2d');
         ctxO.imageSmoothingEnabled=true; ctxO.imageSmoothingQuality='high';
         ctxO.drawImage(img,sx,sy,sw,sh,0,0,cOcr.width,cOcr.height);
@@ -305,6 +306,16 @@ window.switchSideTab = function(n) {
 };
 
 // == FILE INPUT ==
+const btnClearImg = document.getElementById('btn-clear-img');
+if (btnClearImg) btnClearImg.addEventListener('click', () => {
+  currentFile = null;
+  if (scanPreview) scanPreview.src = '';
+  if (previewContainer) previewContainer.classList.add('hidden');
+  if (btnScan) btnScan.classList.add('hidden');
+  if (fileInput) fileInput.value = '';
+  if (ocrStatus) ocrStatus.classList.add('hidden');
+});
+
 if (fileInput) fileInput.addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
   currentFile = f;
@@ -365,9 +376,14 @@ async function runOcrOnFile(file, side) {
     }
   } catch (err) {
     console.error(err);
-    setOcrStatus('Blad OCR: ' + err.message);
+    const msg = (err && err.message) ? err.message : String(err);
+    setOcrStatus('Blad OCR: ' + msg);
   } finally {
-    if (btnScan) btnScan.classList.remove('hidden');
+    // In two-sided mode: after scanning side 1, hide scan button (user uses side2 file input)
+    const doneWithSide1 = isTwoSided && sideIndicators && !sideIndicators.classList.contains('hidden') && side1Data && !side2Data;
+    if (!doneWithSide1) {
+      if (btnScan) btnScan.classList.remove('hidden');
+    }
   }
 }
 
