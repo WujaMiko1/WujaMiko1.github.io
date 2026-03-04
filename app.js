@@ -761,16 +761,9 @@ async function sendToSheets(c) {
   const { url, key } = getSheetsCreds();
   if (!url) return;
   try {
+    // Append params to URL so they survive GAS redirect (302 can drop POST body)
     const p = new URLSearchParams({key,id:c.id,date:c.date,name:c.name,company:c.company,title:c.title,nip:c.nip,phone:c.phone,email:c.email,website:c.website,address:c.address,notes:c.notes});
-    // Try with CORS first, fallback to no-cors
-    try {
-      const res = await fetch(url, {method:'POST', body:p});
-      const json = await res.json();
-      if (json.status === 'error') console.warn('Sheets POST error:', json.message);
-    } catch (e2) {
-      // Fallback no-cors (cannot read response but request still goes through)
-      await fetch(url, {method:'POST', body:p, mode:'no-cors'});
-    }
+    await fetch(url + '?' + p.toString(), {method:'POST', mode:'no-cors'});
   } catch (e) {
     console.warn('Sheets POST failed:', e);
   }
