@@ -598,8 +598,171 @@ main {
   .table-actions { width: 100%; }
   .search-input { width: 100%; }
   .btn-large { width: 100%; }
-  #contacts-table th:nth-child(n+6),
-  #contacts-table td:nth-child(n+6) { display: none; }
+}
+
+/* ---- FAVORITES ---- */
+.btn-fav {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: transform .15s;
+  color: var(--text-muted);
+}
+.btn-fav:hover { transform: scale(1.25); }
+.btn-fav.fav-active { color: #f59e0b; }
+/* Hide star in actions column on desktop (shown in dedicated star column) */
+.td-actions .btn-fav { display: none; }
+
+.th-fav {
+  cursor: pointer;
+  user-select: none;
+  font-size: 16px !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+.th-fav.filter-active { background: rgba(245,158,11,.15); }
+
+/* ---- SORT ---- */
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.sortable:hover { color: var(--text); }
+.sortable.sort-active { color: var(--primary); }
+.sort-icon { font-size: 10px; margin-left: 3px; opacity: 0.5; }
+.sortable.sort-active .sort-icon { opacity: 1; color: var(--primary); }
+
+/* ---- TAGS ---- */
+.tag-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 12px;
+}
+.tag-chip-filter {
+  padding: 4px 12px;
+  border-radius: 99px;
+  border: 1.5px solid var(--border);
+  background: var(--bg2);
+  color: var(--text-light);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+}
+.tag-chip-filter:hover, .tag-chip-filter.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.tag-chip-clear { border-color: var(--danger); }
+.tag-chip-clear:hover { background: var(--danger-light); color: var(--danger); }
+.tag-chips-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag-chip-display {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(59,130,246,.12);
+  color: var(--primary);
+  border: 1px solid rgba(59,130,246,.25);
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.tag-chip-display:hover, .tag-chip-display.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ---- BTN FAVORITE TOGGLE IN FORM ---- */
+.btn-fav-toggle { font-size: 14px; }
+.btn-fav-toggle.active { color: #f59e0b; border-color: #f59e0b; }
+
+/* ---- WHATSAPP BUTTON ---- */
+.btn-whatsapp {
+  background: rgba(37,211,102,.12) !important;
+  color: #25d366 !important;
+  border-color: rgba(37,211,102,.3) !important;
+}
+.btn-whatsapp:hover { background: rgba(37,211,102,.25) !important; }
+
+/* ---- MOBILE CARD TABLE ---- */
+@media (max-width: 700px) {
+  #table-wrapper { border: none; background: transparent; overflow: visible; }
+  #contacts-table thead { display: none; }
+  #contacts-table tbody tr {
+    display: block;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 10px;
+    overflow: hidden;
+  }
+  #contacts-table tbody tr:hover { border-color: var(--primary); }
+  #contacts-table td {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-light);
+    max-width: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+  }
+  #contacts-table td:last-child { border-bottom: none; }
+  #contacts-table td::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: var(--text-muted);
+    min-width: 60px;
+    flex-shrink: 0;
+  }
+  /* Hide fav star column (it's in actions instead on mobile) */
+  #contacts-table td[data-label=""] { display: none; }
+  /* Show fav star in td-actions on mobile */
+  .td-actions .btn-fav { display: inline-flex; }
+  /* Name row - bigger, no label */
+  #contacts-table td[data-label="Imię i Nazwisko"] { padding-top: 12px; font-size: 15px; }
+  #contacts-table td[data-label="Imię i Nazwisko"]::before { display: none; }
+  #contacts-table td[data-label="Imię i Nazwisko"] strong { font-size: 15px; font-weight: 700; }
+  /* Phone & email clickable */
+  #contacts-table td[data-label="Telefon"] a,
+  #contacts-table td[data-label="E-mail"] a { color: var(--primary); font-size: 14px; }
+  /* Hide less used fields on mobile */
+  #contacts-table td[data-label="NIP"],
+  #contacts-table td[data-label="Stanowisko"],
+  #contacts-table td[data-label="Adres"],
+  #contacts-table td[data-label="WWW"],
+  #contacts-table td[data-label="Data"] { display: none; }
+  /* Skip blank cells */
+  #contacts-table td:empty { display: none; }
+  /* Bigger photo */
+  .contact-thumb { width: 52px; height: 34px; border-radius: 6px; }
+  /* Actions bar */
+  #contacts-table td[data-label="Akcje"] {
+    border-top: 1px solid var(--border-light);
+    padding: 10px 14px;
+    margin-top: 2px;
+  }
+  .td-actions { flex-wrap: wrap; gap: 8px; }
+  .td-actions button { padding: 6px 10px; font-size: 16px; }
+  /* Tag chips inline */
+  #contacts-table td[data-label="Tagi"]::before { display: none; }
+  #contacts-table td[data-label="Tagi"] { flex-wrap: wrap; padding-bottom: 6px; }
 }
 
 /* ---- SCROLLBAR ---- */

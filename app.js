@@ -55,10 +55,12 @@ const formFields = {
   website: document.getElementById('f-website'),
   address: document.getElementById('f-address'),
   notes:   document.getElementById('f-notes'),
+  tags:    document.getElementById('f-tags'),
 };
 
 const btnSave      = document.getElementById('btn-save-contact');
 const btnClear     = document.getElementById('btn-cancel-form');
+const btnToggleFav = document.getElementById('btn-toggle-fav');
 const searchInput  = document.getElementById('search-input');
 const contactsBody = document.getElementById('contacts-tbody');
 const btnExport    = document.getElementById('btn-export-csv');
@@ -87,6 +89,11 @@ let side1Photo      = null;
 let side2Photo      = null;
 let pendingDeleteAll = false;
 let pendingDeleteId  = null;
+let sortCol          = 'date';
+let sortDir          = 'desc';
+let filterFav        = false;
+let filterTag        = '';
+let currentFavorite  = false;
 
 // == HELPERS ==
 function setOcrStatus(msg) {
@@ -568,22 +575,44 @@ function loadContacts() {
 function saveContacts() { localStorage.setItem('contacts', JSON.stringify(contacts)); }
 
 // == SAVE CONTACT ==
+if (btnToggleFav) btnToggleFav.addEventListener('click', () => {
+  currentFavorite = !currentFavorite;
+  btnToggleFav.textContent = currentFavorite ? '⭐ Ulubione' : '☆ Ulubione';
+  btnToggleFav.classList.toggle('active', currentFavorite);
+});
+
 if (btnSave) btnSave.addEventListener('click', () => {
   const existing = editingId ? contacts.find(x => x.id === editingId) : null;
+
+  // Duplicate detection (new contacts only)
+  if (!editingId) {
+    const nameStr  = (formFields.name?.value  ||'').trim().toLowerCase();
+    const phoneStr = (formFields.phone?.value ||'').trim().replace(/\s/g,'');
+    const emailStr = (formFields.email?.value ||'').trim().toLowerCase();
+    const dup = contacts.find(c =>
+      (nameStr  && c.name  && c.name.toLowerCase()  === nameStr)  ||
+      (phoneStr && c.phone && c.phone.replace(/\s/g,'') === phoneStr) ||
+      (emailStr && c.email && c.email.toLowerCase() === emailStr)
+    );
+    if (dup) showToast('\u26a0\ufe0f Uwaga: podobny kontakt ju\u017c istnieje (' + (dup.name||dup.company) + ')');
+  }
+
   const c = {
-    id:      editingId || Date.now().toString(),
-    date:    (existing && existing.date) || new Date().toLocaleDateString('pl-PL'),
-    name:    formFields.name?.value.trim()    || '',
-    company: formFields.company?.value.trim() || '',
-    title:   formFields.title?.value.trim()   || '',
-    nip:     formFields.nip?.value.trim()     || '',
-    phone:   formFields.phone?.value.trim()   || '',
-    email:   formFields.email?.value.trim()   || '',
-    website: formFields.website?.value.trim() || '',
-    address: formFields.address?.value.trim() || '',
-    notes:   formFields.notes?.value.trim()   || '',
-    photo:   side1Photo  || (existing && existing.photo)  || '',
-    photo2:  side2Photo  || (existing && existing.photo2) || '',
+    id:       editingId || Date.now().toString(),
+    date:     (existing && existing.date) || new Date().toLocaleDateString('pl-PL'),
+    name:     formFields.name?.value.trim()    || '',
+    company:  formFields.company?.value.trim() || '',
+    title:    formFields.title?.value.trim()   || '',
+    nip:      formFields.nip?.value.trim()     || '',
+    phone:    formFields.phone?.value.trim()   || '',
+    email:    formFields.email?.value.trim()   || '',
+    website:  formFields.website?.value.trim() || '',
+    address:  formFields.address?.value.trim() || '',
+    notes:    formFields.notes?.value.trim()   || '',
+    tags:     formFields.tags?.value.trim()    || '',
+    favorite: currentFavorite,
+    photo:    side1Photo  || (existing && existing.photo)  || '',
+    photo2:   side2Photo  || (existing && existing.photo2) || '',
   };
   if (editingId) {
     contacts = contacts.map(x => x.id === editingId ? c : x);
@@ -592,6 +621,8 @@ if (btnSave) btnSave.addEventListener('click', () => {
   } else {
     contacts.unshift(c);
   }
+  currentFavorite = false;
+  if (btnToggleFav) { btnToggleFav.textContent = '\u2606 Ulubione'; btnToggleFav.classList.remove('active'); }
   saveContacts();
   renderTable();
   clearForm();
@@ -615,6 +646,8 @@ function clearForm() {
   currentSide = 1; switchSideTab(1);
   if (dataForm) dataForm.classList.add('hidden');
   currentFile = null;
+  currentFavorite = false;
+  if (btnToggleFav) { btnToggleFav.textContent = '\u2606 Ulubione'; btnToggleFav.classList.remove('active'); }
 }
 
 if (btnClear) btnClear.addEventListener('click', () => {
@@ -626,10 +659,51 @@ if (btnClear) btnClear.addEventListener('click', () => {
 function renderTable(filter) {
   filter = filter || '';
   const q = filter.toLowerCase();
-  const filtered = contacts.filter(c =>
-    [c.name,c.company,c.title,c.phone,c.email,c.nip].join(' ').toLowerCase().includes(q)
-  );
 
+  // Collect unique tags
+  const allTags = new Set();
+  contacts.forEach(c => {
+    (c.tags||'').split(',').map(t=>t.trim()).filter(Boolean).forEach(t => allTags.add(t));
+  });
+  renderTagChips([...allTags]);
+
+  // Filter
+  let filtered = contacts.filter(c => {
+    const textMatch = [c.name,c.company,c.title,c.phone,c.email,c.nip,c.tags].join(' ').toLowerCase().includes(q);
+    const favMatch  = !filterFav || !!c.favorite;
+    const tagMatch  = !filterTag || (c.tags||'').split(',').map(t=>t.trim()).includes(filterTag);
+    return textMatch && favMatch && tagMatch;
+  });
+
+  // Sort
+  filtered.sort((a, b) => {
+    let va, vb;
+    if (sortCol === 'date') {
+      const pd = s => { const [d,m,y] = (s||'').split('.'); return new Date(+y,+m-1,+d)||new Date(0); };
+      va = pd(a.date); vb = pd(b.date);
+    } else {
+      va = (a[sortCol]||'').toString().toLowerCase();
+      vb = (b[sortCol]||'').toString().toLowerCase();
+    }
+    const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  // Update sort arrows
+  document.querySelectorAll('.sortable').forEach(th => {
+    const col = th.dataset.col;
+    const icon = th.querySelector('.sort-icon');
+    if (icon) icon.textContent = col === sortCol ? (sortDir==='asc'?'↑':'↓') : '⇅';
+    th.classList.toggle('sort-active', col === sortCol);
+  });
+
+  // Fav filter state
+  const btnFF = document.getElementById('btn-filter-fav');
+  if (btnFF) btnFF.classList.toggle('active', filterFav);
+  const btnCF = document.getElementById('btn-clear-filters');
+  if (btnCF) btnCF.classList.toggle('hidden', !filterFav && !filterTag);
+
+  // Empty / table visibility
   const empty = document.getElementById('contacts-empty');
   const tableWrapper = document.getElementById('table-wrapper');
   if (filtered.length === 0) {
@@ -644,21 +718,34 @@ function renderTable(filter) {
   contactsBody.innerHTML = '';
   filtered.forEach(c => {
     const tr = document.createElement('tr');
+    tr.dataset.id = c.id;
     const thumb = c.photo
-      ? `<img src="${esc(c.photo)}" class="contact-thumb" onclick="openLightbox(this.src,'${esc(c.name||'Strona 1')}')" />`
-      : `<span class="no-photo">🪪</span>`;
+      ? '<img src="' + esc(c.photo) + '" class="contact-thumb" onclick="openLightbox(this.src,\'' + esc(c.name||'Strona 1') + '\')" />'
+      : '<span class="no-photo">🪪</span>';
+
+    const tagsHtml = (c.tags||'').split(',').map(t=>t.trim()).filter(Boolean)
+      .map(t => '<span class="tag-chip-display' + (filterTag===t?' active':'') + '" onclick="setTagFilter(\'' + esc(t) + '\')">' + esc(t) + '</span>').join(' ');
+
+    const favBtn = '<button class="btn-fav' + (c.favorite?' fav-active':'') + '" onclick="toggleFavorite(\'' + c.id + '\')" title="' + (c.favorite?'Usuń z ulubionych':'Dodaj do ulubionych') + '">' + (c.favorite?'⭐':'☆') + '</button>';
+
+    const websiteTd = c.website
+      ? '<a href="' + esc(c.website) + '" target="_blank" rel="noopener">' + esc(c.website.replace(/^https?:\/\//,'')) + '</a>'
+      : '';
+
     tr.innerHTML =
-      `<td>${thumb}</td>` +
-      `<td>${esc(c.name)}</td>` +
-      `<td>${esc(c.company)}</td>` +
-      `<td>${esc(c.title)}</td>` +
-      `<td>${esc(c.nip)}</td>` +
-      `<td>${esc(c.phone)}</td>` +
-      `<td>${esc(c.email)}</td>` +
-      `<td>${c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(c.website.replace(/^https?:\/\//,''))}</a>` : ''}</td>` +
-      `<td>${esc(c.address)}</td>` +
-      `<td>${esc(c.date)}</td>` +
-      `<td><button class="btn btn-sm" onclick="editContact('${c.id}')">✏️</button> <button class="btn btn-sm btn-danger" onclick="deleteContact('${c.id}')">🗑️</button></td>`;
+      '<td data-label="">' + favBtn + '</td>' +
+      '<td data-label="Foto">' + thumb + '</td>' +
+      '<td data-label="Imię i Nazwisko"><strong>' + esc(c.name) + '</strong></td>' +
+      '<td data-label="Firma">' + esc(c.company) + '</td>' +
+      '<td data-label="Stanowisko">' + esc(c.title) + '</td>' +
+      '<td data-label="NIP">' + esc(c.nip) + '</td>' +
+      '<td data-label="Telefon">' + (c.phone ? '<a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a>' : '') + '</td>' +
+      '<td data-label="E-mail">' + (c.email ? '<a href="mailto:' + esc(c.email) + '">' + esc(c.email) + '</a>' : '') + '</td>' +
+      '<td data-label="WWW">' + websiteTd + '</td>' +
+      '<td data-label="Adres">' + esc(c.address) + '</td>' +
+      '<td data-label="Data">' + esc(c.date) + '</td>' +
+      '<td data-label="Tagi">' + tagsHtml + '</td>' +
+      '<td data-label="Akcje"><div class="td-actions">' + favBtn + '<button class="btn btn-sm btn-whatsapp" onclick="shareContact(\'' + c.id + '\')" title="WhatsApp">💬</button><button class="btn btn-sm" onclick="editContact(\'' + c.id + '\')">✏️</button><button class="btn btn-sm btn-danger" onclick="deleteContact(\'' + c.id + '\')">🗑️</button></div></td>';
     contactsBody.appendChild(tr);
   });
 }
@@ -673,6 +760,8 @@ window.editContact = function(id) {
   if (!c) return;
   editingId = id;
   for (const [k, el] of Object.entries(formFields)) { if (el) el.value = c[k] || ''; }
+  currentFavorite = !!c.favorite;
+  if (btnToggleFav) { btnToggleFav.textContent = currentFavorite ? '⭐ Ulubione' : '☆ Ulubione'; btnToggleFav.classList.toggle('active', currentFavorite); }
   if (c.photo  && photo1Preview) { photo1Preview.src=c.photo;  if(photo1Wrap) photo1Wrap.classList.remove('hidden'); }
   if (c.photo2 && photo2Preview) { photo2Preview.src=c.photo2; if(photo2Wrap) photo2Wrap.classList.remove('hidden'); }
   if (dataForm) { dataForm.classList.remove('hidden'); dataForm.scrollIntoView({behavior:'smooth'}); }
@@ -685,6 +774,68 @@ window.deleteContact = function(id) {
   if (modalMessage) modalMessage.textContent = 'Czy na pewno chcesz usunac ten kontakt?';
   if (modalOverlay) modalOverlay.classList.remove('hidden');
 };
+
+window.toggleFavorite = function(id) {
+  const c = contacts.find(x => x.id === id); if (!c) return;
+  c.favorite = !c.favorite;
+  saveContacts();
+  renderTable(searchInput ? searchInput.value : '');
+};
+
+window.shareContact = function(id) {
+  const c = contacts.find(x => x.id === id); if (!c) return;
+  const lines = [
+    c.name    && `*${c.name}*`,
+    c.company && `\ud83c\udfe2 ${c.company}`,
+    c.title   && `\ud83d\udcbc ${c.title}`,
+    c.phone   && `\ud83d\udcde ${c.phone}`,
+    c.email   && `\u2709\ufe0f ${c.email}`,
+    c.website && `\ud83c\udf10 ${c.website}`,
+    c.address && `\ud83d\udccd ${c.address}`,
+    c.nip     && `NIP: ${c.nip}`,
+    c.notes   && `\ud83d\udcdd ${c.notes}`,
+  ].filter(Boolean);
+  const text = encodeURIComponent(lines.join('\n'));
+  window.open('https://wa.me/?text=' + text, '_blank');
+};
+
+window.setSortCol = function(col) {
+  if (sortCol === col) { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; }
+  else { sortCol = col; sortDir = 'asc'; }
+  renderTable(searchInput ? searchInput.value : '');
+};
+
+window.toggleFavFilter = function() {
+  filterFav = !filterFav;
+  filterTag = '';
+  renderTable(searchInput ? searchInput.value : '');
+};
+
+window.setTagFilter = function(tag) {
+  filterTag = filterTag === tag ? '' : tag;
+  renderTable(searchInput ? searchInput.value : '');
+};
+
+window.clearFilters = function() {
+  filterFav = false; filterTag = '';
+  renderTable(searchInput ? searchInput.value : '');
+};
+
+function renderTagChips(tags) {
+  const container = document.getElementById('tag-chips');
+  const bar = document.getElementById('tag-filter-bar');
+  if (!container) return;
+  container.innerHTML = '';
+  if (tags.length === 0) { if (bar) bar.classList.add('hidden'); return; }
+  if (bar) bar.classList.remove('hidden');
+  tags.sort().forEach(tag => {
+    const btn = document.createElement('button');
+    btn.className = 'tag-chip-filter' + (filterTag === tag ? ' active' : '');
+    btn.textContent = tag;
+    btn.onclick = () => setTagFilter(tag);
+    container.appendChild(btn);
+  });
+}
 
 if (modalConfirm) modalConfirm.addEventListener('click', () => {
   if (pendingDeleteAll) {
