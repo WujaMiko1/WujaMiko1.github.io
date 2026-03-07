@@ -229,7 +229,8 @@ function preprocessImage(file) {
     reader.onload = ev => {
       const img = new Image();
       img.onload = () => {
-        const SCALE = 0.5;
+        // ---- 1. Card crop detection ----
+        const SCALE = 0.4;
         const cDet = document.createElement('canvas');
         cDet.width  = Math.round(img.width  * SCALE);
         cDet.height = Math.round(img.height * SCALE);
@@ -239,15 +240,16 @@ function preprocessImage(file) {
 
         function sampleCorner(cx, cy) {
           let sum = 0, cnt = 0;
-          for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+          for (let dy = -5; dy <= 5; dy++) for (let dx = -5; dx <= 5; dx++) {
             const idx = ((cy+dy)*cDet.width+(cx+dx))*4;
             if (idx >= 0 && idx < data.length) { sum += (data[idx]+data[idx+1]+data[idx+2])/3; cnt++; }
           }
           return cnt ? sum/cnt : 255;
         }
 
-        const bgBr = (sampleCorner(5,5)+sampleCorner(cDet.width-6,5)+sampleCorner(5,cDet.height-6)+sampleCorner(cDet.width-6,cDet.height-6))/4;
-        const THRESH = 22;
+        const bgBr = (sampleCorner(8,8)+sampleCorner(cDet.width-9,8)+
+                      sampleCorner(8,cDet.height-9)+sampleCorner(cDet.width-9,cDet.height-9))/4;
+        const THRESH = 18;
         let minX=cDet.width, maxX=0, minY=cDet.height, maxY=0, foundCard=false;
         for (let y=0;y<cDet.height;y++) for (let x=0;x<cDet.width;x++) {
           const i2=(y*cDet.width+x)*4;
@@ -258,39 +260,89 @@ function preprocessImage(file) {
 
         let sx=0, sy=0, sw=img.width, sh=img.height;
         if (foundCard) {
-          const f=1/SCALE, PAD=8;
+          const f=1/SCALE, PAD=20;
           sx=Math.max(0,Math.round((minX-PAD)*f));
           sy=Math.max(0,Math.round((minY-PAD)*f));
-          sw=Math.min(img.width, Math.round((maxX-minX+PAD*2)*f));
-          sh=Math.min(img.height,Math.round((maxY-minY+PAD*2)*f));
+          const ex=Math.min(cDet.width, maxX+PAD), ey=Math.min(cDet.height, maxY+PAD);
+          sw=Math.min(img.width-sx, Math.round((ex-minX+PAD*2)*f));
+          sh=Math.min(img.height-sy, Math.round((ey-minY+PAD*2)*f));
         }
 
-        const MAX_DIM = 2400;
-        const UPSCALE = Math.min(2, MAX_DIM / Math.max(sw, sh, 1));
-        const cOcr=document.createElement('canvas');
-        cOcr.width=Math.round(sw*UPSCALE); cOcr.height=Math.round(sh*UPSCALE);
-        const ctxO=cOcr.getContext('2d');
-        ctxO.imageSmoothingEnabled=true; ctxO.imageSmoothingQuality='high';
-        ctxO.drawImage(img,sx,sy,sw,sh,0,0,cOcr.width,cOcr.height);
-        const id2=ctxO.getImageData(0,0,cOcr.width,cOcr.height);
-        const d2=id2.data, C=1.6, IC=128*(1-C);
-        for (let i=0;i<d2.length;i+=4){
-          const g=Math.min(255,Math.max(0,Math.round((d2[i]*.299+d2[i+1]*.587+d2[i+2]*.114)*C+IC)));
-          d2[i]=d2[i+1]=d2[i+2]=g;
-        }
-        ctxO.putImageData(id2,0,0);
+        // ---- 2. Upscale for OCR ----
+        const MAX_DIM = 2800;
+        const UPSCALE = Math.min(3, MAX_DIM / Math.max(sw, sh, 1));
+        const cOcr = document.createElement('canvas');
+        cOcr.width  = Math.round(sw * UPSCALE);
+        cOcr.height = Math.round(sh * UPSCALE);
+        const ctxO = cOcr.getContext('2d');
+        ctxO.imageSmoothingEnabled  = true;
+        ctxO.imageSmoothingQuality  = 'high';
+        ctxO.drawImage(img, sx, sy, sw, sh, 0, 0, cOcr.width, cOcr.height);
 
+        // ---- 3. Grayscale + adaptive contrast ----
+        const id2 = ctxO.getImageData(0, 0, cOcr.width, cOcr.height);
+        const d2 = id2.data;
+        const W = cOcr.width, H = cOcr.height;
+
+        // Convert to grayscale first
+        const gray = new Float32Array(W * H);
+        for (let i = 0; i < d2.length; i += 4) {
+          gray[i/4] = d2[i]*.299 + d2[i+1]*.587 + d2[i+2]*.114;
+        }
+
+        // Adaptive normalization: divide into blocks, normalize each
+        const BLOCK = Math.round(Math.min(W, H) / 8);
+        const normGray = new Float32Array(W * H);
+        for (let by = 0; by < H; by += BLOCK) {
+          for (let bx = 0; bx < W; bx += BLOCK) {
+            let mn = 255, mx = 0;
+            for (let y = by; y < Math.min(by+BLOCK, H); y++)
+              for (let x = bx; x < Math.min(bx+BLOCK, W); x++) {
+                const v = gray[y*W+x]; if(v<mn)mn=v; if(v>mx)mx=v;
+              }
+            const rng = mx - mn || 1;
+            for (let y = by; y < Math.min(by+BLOCK, H); y++)
+              for (let x = bx; x < Math.min(bx+BLOCK, W); x++)
+                normGray[y*W+x] = (gray[y*W+x] - mn) / rng * 255;
+          }
+        }
+
+        // Sharpening (unsharp mask)
+        const sharp = new Float32Array(W * H);
+        const STRENGTH = 1.4;
+        for (let y = 1; y < H-1; y++) {
+          for (let x = 1; x < W-1; x++) {
+            const c2 = normGray[y*W+x];
+            const laplace = 4*c2
+              - normGray[(y-1)*W+x] - normGray[(y+1)*W+x]
+              - normGray[y*W+(x-1)] - normGray[y*W+(x+1)];
+            sharp[y*W+x] = Math.min(255, Math.max(0, c2 + STRENGTH * laplace));
+          }
+        }
+        // edges
+        for (let x = 0; x < W; x++) { sharp[x] = normGray[x]; sharp[(H-1)*W+x] = normGray[(H-1)*W+x]; }
+        for (let y = 0; y < H; y++) { sharp[y*W] = normGray[y*W]; sharp[y*W+W-1] = normGray[y*W+W-1]; }
+
+        // Write back as grayscale
+        for (let i = 0; i < d2.length; i += 4) {
+          const g = Math.round(sharp[i/4]);
+          d2[i]=d2[i+1]=d2[i+2]=g; d2[i+3]=255;
+        }
+        ctxO.putImageData(id2, 0, 0);
+
+        // ---- 4. Update preview (color, not processed) ----
         if (scanPreview) {
-          const pv=document.createElement('canvas');
-          const ms=Math.min(1,400/sw);
-          pv.width=Math.round(sw*ms); pv.height=Math.round(sh*ms);
-          pv.getContext('2d').drawImage(img,sx,sy,sw,sh,0,0,pv.width,pv.height);
-          scanPreview.src=pv.toDataURL();
+          const pv = document.createElement('canvas');
+          const ms = Math.min(1, 420/Math.max(sw,1));
+          pv.width  = Math.round(sw * ms);
+          pv.height = Math.round(sh * ms);
+          pv.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, pv.width, pv.height);
+          scanPreview.src = pv.toDataURL();
         }
 
         cOcr.toBlob(blob => resolve(blob), 'image/png');
       };
-      img.src=ev.target.result;
+      img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
   });
@@ -320,25 +372,39 @@ if (btnClearImg) btnClearImg.addEventListener('click', () => {
   if (previewContainer) previewContainer.classList.add('hidden');
   if (btnScan) btnScan.classList.add('hidden');
   if (fileInput) fileInput.value = '';
+  const fg = document.getElementById('file-input-gallery');
+  const fc = document.getElementById('file-input-camera');
+  if (fg) fg.value = ''; if (fc) fc.value = '';
   if (ocrStatus) ocrStatus.classList.add('hidden');
 });
 
-if (fileInput) fileInput.addEventListener('change', e => {
-  const f = e.target.files[0]; if (!f) return;
+function handleFileSelected(f) {
+  if (!f) return;
   currentFile = f;
   if (scanPreview) scanPreview.src = URL.createObjectURL(f);
   if (previewContainer) previewContainer.classList.remove('hidden');
   if (btnScan) btnScan.classList.remove('hidden');
-});
+}
 
-if (fileInput2) fileInput2.addEventListener('change', async e => {
-  const f = e.target.files[0]; if (!f) return;
+if (fileInput) fileInput.addEventListener('change', e => handleFileSelected(e.target.files[0]));
+const fileInputCamera  = document.getElementById('file-input-camera');
+const fileInputGallery = document.getElementById('file-input-gallery');
+if (fileInputCamera)  fileInputCamera.addEventListener('change',  e => handleFileSelected(e.target.files[0]));
+if (fileInputGallery) fileInputGallery.addEventListener('change', e => handleFileSelected(e.target.files[0]));
+
+async function handleSide2File(f) {
+  if (!f) return;
   side2Photo = await resizeImageToBase64(f, 800);
-  await runOcrOnFile(f, 2);
   if (side2Prompt) side2Prompt.classList.add('hidden');
   if (tabSide2) tabSide2.classList.add('done');
-  mergeAndPopulate();
-});
+  await runOcrOnFile(f, 2);  // mergeAndPopulate called inside
+}
+
+if (fileInput2) fileInput2.addEventListener('change', e => handleSide2File(e.target.files[0]));
+const fileInput2Camera  = document.getElementById('file-input-side2-camera');
+const fileInput2Gallery = document.getElementById('file-input-side2-gallery');
+if (fileInput2Camera)  fileInput2Camera.addEventListener('change',  e => handleSide2File(e.target.files[0]));
+if (fileInput2Gallery) fileInput2Gallery.addEventListener('change', e => handleSide2File(e.target.files[0]));
 
 if (btnSkipSide2) btnSkipSide2.addEventListener('click', () => {
   if (side2Prompt) side2Prompt.classList.add('hidden');
@@ -361,7 +427,10 @@ async function runOcrOnFile(file, side) {
         if (m.status === 'recognizing text') {
           setOcrStatus('Strona ' + side + ': OCR ' + Math.round(m.progress*100) + '%...');
         }
-      }
+      },
+      tessedit_pageseg_mode: '6',
+      preserve_interword_spaces: '1',
+      tessedit_char_blacklist: '|\\`~^',
     });
     const text = result.data.text;
     const parsed = parseBusinessCard(text);
@@ -371,13 +440,14 @@ async function runOcrOnFile(file, side) {
       side1Photo = await resizeImageToBase64(file, 800);
       if (tabSide1) tabSide1.classList.add('done');
       if (isTwoSided) {
-        setOcrStatus('Strona 1 gotowa. Teraz zeskanuj strone 2.');
+        setOcrStatus('Strona 1 gotowa. Teraz zeskanuj stronę 2.');
         if (side2Prompt) side2Prompt.classList.remove('hidden');
         switchSideTab(2);
       } else {
         mergeAndPopulate();
       }
     } else {
+      // side 2: photo already set in handleSide2File before calling runOcrOnFile
       side2Data = parsed;
       mergeAndPopulate();
     }
@@ -837,27 +907,15 @@ function renderTagChips(tags) {
   });
 }
 
-if (modalConfirm) modalConfirm.addEventListener('click', () => {
-  if (pendingDeleteAll) {
-    contacts = [];
-  } else if (pendingDeleteId) {
-    contacts = contacts.filter(x => x.id !== pendingDeleteId);
-  }
-  pendingDeleteId = null; pendingDeleteAll = false;
-  saveContacts();
-  renderTable(searchInput ? searchInput.value : '');
-  if (modalOverlay) modalOverlay.classList.add('hidden');
-  showToast('Usunieto.', 'danger');
-});
-
 if (modalCancel) modalCancel.addEventListener('click', () => {
   pendingDeleteId = null; pendingDeleteAll = false;
+  if (modalConfirm) modalConfirm._clearCloud = false;
   if (modalOverlay) modalOverlay.classList.add('hidden');
 });
 
 if (btnClearAll) btnClearAll.addEventListener('click', () => {
   pendingDeleteAll = true; pendingDeleteId = null;
-  if (modalMessage) modalMessage.textContent = 'Czy na pewno chcesz usunac WSZYSTKIE kontakty?';
+  if (modalMessage) modalMessage.textContent = 'Czy na pewno chcesz usunąć WSZYSTKIE kontakty lokalnie?';
   if (modalOverlay) modalOverlay.classList.remove('hidden');
 });
 
@@ -920,6 +978,19 @@ async function sendToSheets(c) {
   }
 }
 
+async function clearCloudSheets() {
+  const { url, key } = getSheetsCreds();
+  if (!url || !key) { showToast('Brak ustawień synchronizacji!', 'danger'); return; }
+  try {
+    showToast('Czyszczę chmurę...');
+    const p = new URLSearchParams({ key, action: 'clearAll' });
+    const res = await fetch(url + '?' + p.toString(), { method: 'POST', mode: 'no-cors' });
+    showToast('✅ Chmura wyczyszczona.');
+  } catch (e) {
+    showToast('Błąd czyszczenia chmury: ' + (e.message || String(e)), 'danger');
+  }
+}
+
 async function syncFromSheets() {
   const { url, key } = getSheetsCreds();
   if (!url || !key) {
@@ -967,6 +1038,36 @@ if (btnSync) btnSync.addEventListener('click', async () => {
   await syncFromSheets();
   btnSync.disabled = false;
   btnSync.textContent = '🔄';
+});
+
+// Clear cloud button
+const btnClearCloud = document.getElementById('btn-clear-cloud');
+if (btnClearCloud) btnClearCloud.addEventListener('click', () => {
+  pendingDeleteAll = false;
+  pendingDeleteId  = null;
+  if (modalMessage) modalMessage.textContent = 'Czy na pewno chcesz usunąć WSZYSTKIE kontakty z chmury (Google Sheets)? Dane lokalne NIE zostaną usunięte.';
+  if (modalOverlay) modalOverlay.classList.remove('hidden');
+  modalConfirm._clearCloud = true;
+});
+
+// Override modal confirm to handle cloud clear
+if (modalConfirm) modalConfirm.addEventListener('click', () => {
+  if (modalConfirm._clearCloud) {
+    modalConfirm._clearCloud = false;
+    if (modalOverlay) modalOverlay.classList.add('hidden');
+    clearCloudSheets();
+    return;
+  }
+  if (pendingDeleteAll) {
+    contacts = [];
+  } else if (pendingDeleteId) {
+    contacts = contacts.filter(x => x.id !== pendingDeleteId);
+  }
+  pendingDeleteId = null; pendingDeleteAll = false;
+  saveContacts();
+  renderTable(searchInput ? searchInput.value : '');
+  if (modalOverlay) modalOverlay.classList.add('hidden');
+  showToast('Usunięto.', 'danger');
 });
 
 // Test connection button

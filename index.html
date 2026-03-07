@@ -64,6 +64,7 @@
           <div class="btn-row">
             <button id="btn-save-settings" class="btn btn-primary">💾 Zapisz</button>
             <button id="btn-test-connection" class="btn btn-secondary">🔗 Testuj połączenie</button>
+            <button id="btn-clear-cloud" class="btn btn-danger">🗑️ Wyczyść chmurę</button>
           </div>
           <div id="connection-status"></div>
         </div>
@@ -107,15 +108,22 @@
           </button>
         </div>
 
-        <p class="hint" id="scan-hint">Zrób zdjęcie wizytówki lub wybierz ją z galerii. OCR automatycznie wyciągnie dane.</p>
+        <p class="hint" id="scan-hint">Zrób zdjęcie lub wybierz plik z galerii. OCR automatycznie wyciągnie dane kontaktowe.</p>
 
         <div id="drop-zone">
-          <input type="file" id="file-input" accept="image/*" capture="environment" />
-          <label for="file-input" class="upload-label">
-            <span class="upload-icon">📸</span>
-            <span class="upload-text">Dotknij, aby zrobić zdjęcie</span>
-            <span class="upload-sub">lub wybierz z galerii</span>
-          </label>
+          <div class="upload-buttons">
+            <label for="file-input-camera" class="upload-btn upload-camera">
+              <span class="upload-icon">📸</span>
+              <span class="upload-btn-text">Aparat</span>
+            </label>
+            <label for="file-input-gallery" class="upload-btn upload-gallery">
+              <span class="upload-icon">🖼️</span>
+              <span class="upload-btn-text">Galeria / Plik</span>
+            </label>
+          </div>
+          <input type="file" id="file-input" accept="image/*" capture="environment" style="display:none" />
+          <input type="file" id="file-input-camera" accept="image/*" capture="environment" style="display:none" />
+          <input type="file" id="file-input-gallery" accept="image/*" style="display:none" />
         </div>
 
         <div id="preview-container" class="hidden">
@@ -133,10 +141,17 @@
         <div id="side2-prompt" class="side2-prompt hidden">
           <div class="side2-done">✅ Strona 1 zeskanowana</div>
           <p>Teraz zrób zdjęcie drugiej strony wizytówki, aby uzupełnić brakujące dane.</p>
-          <label for="file-input-side2" class="btn btn-secondary" style="margin-top:10px;display:inline-flex;">
-            📷 Zeskanuj stronę 2
-          </label>
+          <div class="upload-buttons" style="margin-top:10px">
+            <label for="file-input-side2-camera" class="upload-btn upload-camera upload-btn-sm">
+              <span>📸 Aparat</span>
+            </label>
+            <label for="file-input-side2-gallery" class="upload-btn upload-gallery upload-btn-sm">
+              <span>🖼️ Galeria</span>
+            </label>
+          </div>
           <input type="file" id="file-input-side2" accept="image/*" capture="environment" style="display:none" />
+          <input type="file" id="file-input-side2-camera" accept="image/*" capture="environment" style="display:none" />
+          <input type="file" id="file-input-side2-gallery" accept="image/*" style="display:none" />
           <button id="btn-skip-side2" class="btn btn-ghost btn-sm" style="margin-top:8px">Pomiń – tylko strona 1</button>
         </div>
       </section>
